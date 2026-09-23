@@ -1661,10 +1661,26 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
   const opacity = useSharedValue(1);
   const [isDismissed, setIsDismissed] = useState(false);
   const [step, setStep] = useState(0);
+  const dismissTimerRef = React.useRef(null);
+
+  // Clear any pending dismiss timer on unmount so setIsDismissed/onDismissed
+  // never fire on an unmounted (or remounted) overlay.
+  useEffect(() => {
+    return () => {
+      if (dismissTimerRef.current) {
+        clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const dismiss = React.useCallback(() => {
     opacity.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.quad) });
-    setTimeout(() => {
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
+    }
+    dismissTimerRef.current = setTimeout(() => {
+      dismissTimerRef.current = null;
       setIsDismissed(true);
       if (typeof onDismissed === 'function') {
         try {
