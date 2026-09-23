@@ -5,9 +5,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const useStore = create(
   persist(
     (set, get) => ({
-      coins: 0,
-      diamonds: 0,
-      lives: 5,
+      // NOTE: coins/diamonds/hearts live in CurrencyContext (the single ledger
+      // the UI displays). This store keeps collection, levels, and settings.
       collection: [], // Will store item IDs
       equippedSkin: null,
       equippedBlockTheme: null,
@@ -97,28 +96,6 @@ export const useStore = create(
           AsyncStorage.setItem('levelProgress', JSON.stringify(clean)).catch(() => {});
         } catch (_) {}
       },
-      
-      addCoins: (amount) => set((state) => ({ coins: state.coins + amount })),
-      addDiamonds: (amount) => set((state) => ({ diamonds: (state.diamonds || 0) + amount })),
-      spendDiamonds: (amount) => {
-        const current = get().diamonds || 0;
-        if (current >= amount) {
-          set({ diamonds: current - amount });
-          return true;
-        }
-        return false;
-      },
-      addLives: (amount) => set((state) => ({ lives: Math.min(5, (state.lives || 0) + amount) })),
-      
-      removeCoins: (amount) => {
-        if (get().coins >= amount) {
-          set((state) => ({ coins: state.coins - amount }));
-          return true;
-        }
-        return false;
-      },
-      
-      removeLife: () => set((state) => ({ lives: Math.max(0, state.lives - 1) })),
       
       addItem: (item) => {
         set((state) => {

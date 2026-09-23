@@ -71,7 +71,7 @@ export const DailyRewardModal = ({ visible, onClose }) => {
   const [loading, setLoading] = useState(true);
 
   const { addCoins: addCoinsCurrency, addDiamonds: addDiamondsCurrency, addHearts: addHeartsCurrency } = useCurrency();
-  const { addCoins, addDiamonds, addLives, settings } = useStore();
+  const { settings } = useStore();
   const claimButtonScale = useSharedValue(1);
 
   const refreshStatus = async () => {
@@ -102,21 +102,18 @@ export const DailyRewardModal = ({ visible, onClose }) => {
 
     const reward = DAILY_REWARDS[currentStreak - 1];
     if (reward) {
+      // Single ledger: CurrencyContext only. (The old zustand store mirror
+      // was a shadow balance the UI never displayed.)
       if (reward.rewardType === 'coins') {
         addCoinsCurrency(reward.amount);
-        addCoins(reward.amount);
       } else if (reward.rewardType === 'diamonds') {
         addDiamondsCurrency(reward.amount);
-        addDiamonds(reward.amount);
       } else if (reward.rewardType === 'lives' || reward.rewardType === 'hearts') {
         addHeartsCurrency(reward.amount);
-        addLives(reward.amount);
       } else if (reward.rewardType === 'jackpot') {
         addDiamondsCurrency(reward.amount);
-        addDiamonds(reward.amount);
         if (reward.bonusCoins) {
           addCoinsCurrency(reward.bonusCoins);
-          addCoins(reward.bonusCoins);
         }
       }
     }

@@ -16,7 +16,8 @@ export interface CurrencyContextType extends CurrencyState {
   addDiamonds: (amount: number) => void;
   spendDiamonds: (amount: number) => boolean;
   addHearts: (amount: number) => void;
-  useHeart: () => boolean;
+  /** Deducts one heart (unless unlimited) and returns hearts remaining. */
+  useHeart: () => number;
   setUnlimitedHearts: (enabled: boolean) => void;
   refillHearts: (amount?: number) => void;
   addHints: (amount: number) => void;
@@ -42,7 +43,7 @@ const CurrencyContext = createContext<CurrencyContextType>({
   addDiamonds: () => {},
   spendDiamonds: () => false,
   addHearts: () => {},
-  useHeart: () => false,
+  useHeart: () => 0,
   setUnlimitedHearts: () => {},
   refillHearts: () => {},
   addHints: () => {},
@@ -59,6 +60,9 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
   const stateRef = React.useRef<CurrencyState>(DEFAULT_STATE);
+  // Synchronous mirror of hearts so useHeart can return the remaining count
+  // without relying on React's eager updater evaluation.
+  const heartsRef = React.useRef<number>(DEFAULT_STATE.hearts);
 
   // Helper to persist state to AsyncStorage
   const persistState = useCallback((updated: Partial<CurrencyState>) => {
@@ -78,7 +82,10 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             stateRef.current = { ...DEFAULT_STATE, ...parsed };
             if (typeof parsed.coins === 'number') setCoins(parsed.coins);
             if (typeof parsed.diamonds === 'number') setDiamonds(parsed.diamonds);
-            if (typeof parsed.hearts === 'number') setHearts(parsed.hearts);
+            if (typeof parsed.hearts === 'number') {
+              setHearts(parsed.hearts);
+              heartsRef.current = parsed.hearts;
+            }
             if (typeof parsed.hasUnlimitedHearts === 'boolean') {
               setUnlimitedHeartsState(parsed.hasUnlimitedHearts);
             } else if (typeof parsed.unlimitedHearts === 'boolean') {
@@ -147,22 +154,15 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return success;
   }, [persistState]);
 
-  const useHeart = useCallback((): boolean => {
+  const useHeart = useCallback((): number => {
     if (unlimitedHearts) {
-      return true; // Unlimited hearts active, no deduction needed
+      return heartsRef.current; // Unlimited hearts active, no deduction needed
     }
-    let success = false;
-    setHearts((prev) => {
-      if (prev <= 0) {
-        success = false;
-        return 0;
-      }
-      success = true;
-      const next = prev - 1;
-      persistState({ hearts: next });
-      return next;
-    });
-    return success;
+    const remaining = Math.max(0, heartsRef.current - 1);
+    heartsRef.current = remaining;
+    setHearts(remaining);
+    persistState({ hearts: remaining });
+    return remaining;
   }, [unlimitedHearts, persistState]);
 
   const addHearts = useCallback((amount: number) => {
@@ -170,6 +170,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setHearts((prev) => {
       // Hard cap at 5 hearts max
       const next = Math.min(5, prev + amount);
+      heartsRef.current = next;
       persistState({ hearts: next });
       return next;
     });
@@ -206,6 +207,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const refillHearts = useCallback((amount: number = 3) => {
     const capped = Math.min(5, amount);
+    heartsRef.current = capped;
     setHearts(capped);
     persistState({ hearts: capped });
   }, [persistState]);

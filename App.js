@@ -721,7 +721,8 @@ const GameScreen = ({ onBack }) => {
   const [isWon, setIsWon] = useState(false);
   const [isGenerating, setIsGenerating] = useState(true);
   const [isGameOver, setIsGameOver] = useState(false);
-  const [hearts, setHearts] = useState(3);
+  // Hearts (strikes) live in CurrencyContext — the header and the in-game
+  // hearts row both read currency.hearts as the single source of truth.
   const [blocksLeft, setBlocksLeft] = useState(0);
   const [activeArrowsState, setActiveArrowsState] = useState([]);
   const [isLevelComplete, setIsLevelComplete] = useState(false);
@@ -769,7 +770,7 @@ const GameScreen = ({ onBack }) => {
     setFloatingTexts(prev => prev.filter(item => item.id !== id));
   }, []);
 
-  const { lives, currentLevel, activeDifficulty, levelUp, settings, addCoins, spendDiamonds } = useStore();
+  const { currentLevel, activeDifficulty, levelUp, settings } = useStore();
   const currency = useCurrency();
   
   const activeLevel = typeof currentLevel === 'object' && currentLevel !== null
@@ -846,8 +847,8 @@ const GameScreen = ({ onBack }) => {
   const handleWaveComplete = React.useCallback(() => {
     try {
       // 1. Award coins silently in-memory (stripping any broken AsyncStorage writes)
-      if (typeof addCoins === 'function') {
-        addCoins(25);
+      if (typeof currency.addCoins === 'function') {
+        currency.addCoins(25);
       }
       if (settings?.haptics) {
         try {
@@ -911,7 +912,7 @@ const GameScreen = ({ onBack }) => {
         setGrid(nextMatrix.grid);
         setActiveArrowsState(nextMatrix.arrows);
         setBlocksLeft(nextMatrix.arrows.length);
-        setHearts(3);
+        currency.refillHearts(3);
         setIsGameOver(false);
         setIsWon(false);
         setIsGenerating(false);
@@ -933,14 +934,14 @@ const GameScreen = ({ onBack }) => {
         initLevel();
       } catch (_) {}
     }
-  }, [addCoins, levelUp, settings?.haptics, activeLevel, activeDifficulty, buildLevelMatrix, nextLevelMatrix]);
+  }, [currency.addCoins, levelUp, settings?.haptics, activeLevel, activeDifficulty, buildLevelMatrix, nextLevelMatrix]);
 
   const initLevel = () => {
     setIsWon(false);
     setIsGameOver(false);
     setIsLevelComplete(false);
     setIsAdLoading(false);
-    setHearts(3);
+    currency.refillHearts(3);
     setFloatingTexts([]);
     comboCountRef.current = 0;
     boardFadeOpacity.value = 1;
@@ -1107,13 +1108,10 @@ const GameScreen = ({ onBack }) => {
       } else {
         // If player has Unlimited Hearts, bypass heart deduction and do not trigger Game Over!
         if (!currency.hasUnlimitedHearts && !currency.unlimitedHearts) {
-          setHearts(prev => {
-            const nextHearts = Math.max(0, prev - 1);
-            if (nextHearts === 0) {
-              setIsGameOver(true);
-            }
-            return nextHearts;
-          });
+          const remaining = currency.useHeart();
+          if (remaining <= 0) {
+            setIsGameOver(true);
+          }
         }
 
         AudioController.playInvalidArrow();
@@ -1154,7 +1152,7 @@ const GameScreen = ({ onBack }) => {
   const handleWatchAdRevive = () => {
     AdService.showRewarded(
       () => {
-        setHearts(3);
+        currency.refillHearts(3);
         setIsGameOver(false);
         if (settings.haptics) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1209,9 +1207,9 @@ const GameScreen = ({ onBack }) => {
   };
 
   const handleSpendDiamondsRevive = () => {
+    // Single debit: CurrencyContext is the only diamonds ledger.
     if (currency.spendDiamonds(50)) {
-      spendDiamonds(50);
-      setHearts(3);
+      currency.refillHearts(3);
       setIsGameOver(false);
       if (settings.haptics) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1235,31 +1233,6 @@ const GameScreen = ({ onBack }) => {
     setIsGameOver(false);
     initLevel();
   };
-
-  if (lives <= 0) {
-    return (
-      <View style={[styles.outOfLivesContainer, { backgroundColor: theme.background }]}>
-        <Text style={styles.outOfLivesTitle}>Out of Lives 💔</Text>
-        <Text style={styles.outOfLivesSub}>Take a cozy break!</Text>
-        <JuicyButton style={styles.refillButton} onPress={() => {
-          AdService.showRewarded(
-            () => {
-              useStore.setState({ lives: 5 });
-            },
-            null,
-            () => {
-              Alert.alert('Ad unavailable', 'The ad could not be loaded. Check your connection and try again.');
-            }
-          );
-        }}>
-          <Text style={styles.refillText}>Watch Ad to Restore Lives</Text>
-        </JuicyButton>
-        <JuicyButton style={[styles.refillButton, { marginTop: 15, backgroundColor: '#FFF'}]} onPress={onBack}>
-          <Text style={[styles.refillText, { color: '#7A7A7A' }]}>Back to Home</Text>
-        </JuicyButton>
-      </View>
-    );
-  }
 
   return (
     <SafeAreaViewContext style={[styles.safeArea, { backgroundColor: theme.background }]}>
@@ -1299,8 +1272,8 @@ const GameScreen = ({ onBack }) => {
             </View>
           ) : (
             [1, 2, 3].map(i => (
-              <Text key={i} style={[styles.heartIcon, hearts < i && styles.heartEmpty]}>
-                {hearts >= i ? '❤️' : '🤍'}
+              <Text key={i} style={[styles.heartIcon, currency.hearts < i && styles.heartEmpty]}>
+                {currency.hearts >= i ? '❤️' : '🤍'}
               </Text>
             ))
           )}
@@ -1542,7 +1515,8 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
 });
 
 const RewardModal = ({ visible, onNextLevel }) => {
-  const { addCoins, addItem, settings } = useStore();
+  const { addItem, settings } = useStore();
+  const currency = useCurrency();
   const [droppedItem, setDroppedItem] = useState(null);
   const [opened, setOpened] = useState(false);
 
@@ -1556,7 +1530,7 @@ const RewardModal = ({ visible, onNextLevel }) => {
   const handleOpen = () => {
     if (opened) return;
     setOpened(true);
-    addCoins(50);
+    currency.addCoins(50);
     
     if (settings.haptics) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -2284,34 +2258,6 @@ const styles = StyleSheet.create({
   retryText: {
     color: '#F3EBE1',
     fontSize: 16,
-    fontWeight: '800',
-  },
-  outOfLivesContainer: {
-    flex: 1,
-    backgroundColor: '#F3EBE1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  outOfLivesTitle: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#261E1A',
-    marginBottom: 10,
-  },
-  outOfLivesSub: {
-    fontSize: 16,
-    color: '#7A6E65',
-    marginBottom: 36,
-  },
-  refillButton: {
-    backgroundColor: '#261E1A',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 18,
-  },
-  refillText: {
-    color: '#F3EBE1',
-    fontSize: 18,
     fontWeight: '800',
   },
   rewardOverlay: {
