@@ -23,12 +23,12 @@ const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
 
 export const DAILY_REWARDS = [
   { day: 1, label: 'Day 1', rewardType: 'coins', amount: 50, icon: '🪙', title: '+50 Coins' },
-  { day: 2, label: 'Day 2', rewardType: 'lives', amount: 2, icon: '❤️', title: '+2 Hearts' },
+  { day: 2, label: 'Day 2', rewardType: 'hints', amount: 2, icon: '💡', title: '+2 Hints' },
   { day: 3, label: 'Day 3', rewardType: 'coins', amount: 100, icon: '🪙', title: '+100 Coins' },
   { day: 4, label: 'Day 4', rewardType: 'diamonds', amount: 5, icon: '💎', title: '+5 Diamonds' },
   { day: 5, label: 'Day 5', rewardType: 'coins', amount: 150, icon: '🪙', title: '+150 Coins' },
-  { day: 6, label: 'Day 6', rewardType: 'lives', amount: 3, icon: '❤️', title: '+3 Hearts' },
-  { day: 7, label: 'Day 7', rewardType: 'jackpot', amount: 10, bonusCoins: 250, icon: '👑', title: '10 💎 + 250 🪙', isBig: true },
+  { day: 6, label: 'Day 6', rewardType: 'hearts', amount: 2, bonusHints: 2, icon: '❤️', title: '+2 Hearts + 2 💡' },
+  { day: 7, label: 'Day 7', rewardType: 'jackpot', amount: 10, bonusCoins: 250, bonusHints: 3, icon: '👑', title: '10 💎 + 250 🪙 + 3 💡', isBig: true },
 ];
 
 export const checkDailyRewardStatus = async () => {
@@ -87,7 +87,7 @@ export const DailyRewardModal = ({ visible, onClose }) => {
   // slip past the isClaiming check and grant twice.
   const claimingRef = useRef(false);
 
-  const { addCoins: addCoinsCurrency, addDiamonds: addDiamondsCurrency, addHearts: addHeartsCurrency } = useCurrency();
+  const { addCoins: addCoinsCurrency, addDiamonds: addDiamondsCurrency, addHearts: addHeartsCurrency, addHints: addHintsCurrency } = useCurrency();
   const { settings } = useStore();
   const claimButtonScale = useSharedValue(1);
 
@@ -121,20 +121,45 @@ export const DailyRewardModal = ({ visible, onClose }) => {
       );
 
       const reward = DAILY_REWARDS[currentStreak - 1];
+
+      // Save the claim BEFORE granting currency: if storage fails, nothing
+      // was granted, so retrying can't double-grant the reward. (Previously
+      // the grant happened first and a failed save left a retry paying out
+      // twice.)
+      const now = Date.now();
+      const todayDateStr = new Date(now).toDateString();
+      await AsyncStorage.setItem(DAILY_REWARD_STORAGE_KEY, JSON.stringify({
+        lastClaimedDate: todayDateStr,
+        lastClaimedTimestamp: now,
+        streak: currentStreak,
+      }));
+
       if (reward) {
         // Single ledger: CurrencyContext only. (The old zustand store mirror
         // was a shadow balance the UI never displayed.)
+        // Grants are data-driven: the primary rewardType plus any bonus*
+        // fields, so mixed days (e.g. hearts + hints) just work.
+        const grants = [];
         if (reward.rewardType === 'coins') {
-          addCoinsCurrency(reward.amount);
+          grants.push(['coins', reward.amount]);
         } else if (reward.rewardType === 'diamonds') {
-          addDiamondsCurrency(reward.amount);
+          grants.push(['diamonds', reward.amount]);
         } else if (reward.rewardType === 'lives' || reward.rewardType === 'hearts') {
-          addHeartsCurrency(reward.amount);
+          grants.push(['hearts', reward.amount]);
+        } else if (reward.rewardType === 'hints') {
+          grants.push(['hints', reward.amount]);
         } else if (reward.rewardType === 'jackpot') {
-          addDiamondsCurrency(reward.amount);
-          if (reward.bonusCoins) {
-            addCoinsCurrency(reward.bonusCoins);
-          }
+          grants.push(['diamonds', reward.amount]);
+        }
+        if (reward.bonusCoins) grants.push(['coins', reward.bonusCoins]);
+        if (reward.bonusDiamonds) grants.push(['diamonds', reward.bonusDiamonds]);
+        if (reward.bonusHearts) grants.push(['hearts', reward.bonusHearts]);
+        if (reward.bonusHints) grants.push(['hints', reward.bonusHints]);
+        for (const [type, amount] of grants) {
+          if (type === 'coins') addCoinsCurrency(amount);
+          else if (type === 'diamonds') addDiamondsCurrency(amount);
+          else if (type === 'hearts') addHeartsCurrency(amount);
+          else if (type === 'hints') addHintsCurrency(amount);
         }
       }
 
@@ -143,16 +168,6 @@ export const DailyRewardModal = ({ visible, onClose }) => {
       if (settings.haptics) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-
-      // Save to AsyncStorage — only mark claimed after the save succeeds, so a
-      // storage failure leaves the reward claimable instead of stuck.
-      const now = Date.now();
-      const todayDateStr = new Date(now).toDateString();
-      await AsyncStorage.setItem(DAILY_REWARD_STORAGE_KEY, JSON.stringify({
-        lastClaimedDate: todayDateStr,
-        lastClaimedTimestamp: now,
-        streak: currentStreak,
-      }));
 
       setCanClaim(false);
       setClaimedToday(true);
