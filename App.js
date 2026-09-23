@@ -691,8 +691,9 @@ export const getArrowOrthogonalDirection = (arrow) => {
 // Checks strictly the single grid coordinate directly in front of the arrow's head.
 // Completely ignores adjacent tiles touching the arrow's tail or body.
 export const canMove = (arrow, boardGrid) => {
-  if (!arrow || !boardGrid) return false;
+  if (!arrow || !arrow.cells || arrow.cells.length === 0 || !boardGrid) return false;
   const head = arrow.cells[arrow.cells.length - 1];
+  if (!head) return false;
   let targetR = head.r;
   let targetC = head.c;
 
@@ -712,8 +713,9 @@ export const canMove = (arrow, boardGrid) => {
     return true;
   }
 
-  // On the board -> unblocked only if that single target cell is completely empty (null)
-  return boardGrid[targetR][targetC] === null;
+  // On the board -> unblocked only if that single target cell is completely empty (null).
+  // The ?. guards against ragged/malformed rows; unknown cells count as blocked.
+  return boardGrid[targetR]?.[targetC] === null;
 };
 
 const GameScreen = ({ onBack }) => {
@@ -1056,7 +1058,7 @@ const GameScreen = ({ onBack }) => {
     
     if (clickedArrow) {
       const h = clickedArrow.cells[clickedArrow.cells.length - 1];
-      if (!grid[h.r] || grid[h.r][h.c]?.id !== clickedArrow.id) return;
+      if (!grid[h.r] || grid[h.r]?.[h.c]?.id !== clickedArrow.id) return;
 
       // Color transition strictly locked inside this if/else block:
       // IF 'canMove' is true: Immediately trigger withTiming to Green & slither
@@ -1584,6 +1586,18 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
   const { settings } = useStore();
   const { theme } = useTheme();
 
+  // Tracks the pending slither-completion timeout so it can be cancelled if the
+  // arrow unmounts (level change / restart) or slither() is re-triggered.
+  const slitherTimeoutRef = React.useRef(null);
+  React.useEffect(() => {
+    return () => {
+      if (slitherTimeoutRef.current) {
+        clearTimeout(slitherTimeoutRef.current);
+        slitherTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const cells = arrow.cells;
   const N = cells.length;
   const head = cells[N - 1];
@@ -1650,7 +1664,11 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
       scale.value = 1;
       isGreen.value = withTiming(1, { duration: 150 });
       progress.value = withTiming(EXIT_DIST, { duration: slitherDuration, easing: Easing.inOut(Easing.ease) });
-      setTimeout(() => {
+      if (slitherTimeoutRef.current) {
+        clearTimeout(slitherTimeoutRef.current);
+      }
+      slitherTimeoutRef.current = setTimeout(() => {
+        slitherTimeoutRef.current = null;
         if (typeof onSlitherComplete === 'function') {
           try {
             onSlitherComplete();

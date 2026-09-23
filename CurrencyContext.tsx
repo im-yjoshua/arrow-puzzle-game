@@ -104,54 +104,40 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
   }, []);
 
+  // All balance mutations compute the next value from the synchronous stateRef
+  // mirror, then set React state and persist. State updaters stay pure — no
+  // side effects (persistState) run inside them, and nothing relies on React's
+  // eager updater evaluation.
   const addCoins = useCallback((amount: number) => {
     if (amount <= 0) return;
-    setCoins((prev) => {
-      const next = prev + amount;
-      persistState({ coins: next });
-      return next;
-    });
+    const next = stateRef.current.coins + amount;
+    setCoins(next);
+    persistState({ coins: next });
   }, [persistState]);
 
   const spendCoins = useCallback((amount: number): boolean => {
     if (amount <= 0) return true;
-    let success = false;
-    setCoins((prev) => {
-      if (prev < amount) {
-        success = false;
-        return prev;
-      }
-      success = true;
-      const next = prev - amount;
-      persistState({ coins: next });
-      return next;
-    });
-    return success;
+    if (stateRef.current.coins < amount) return false;
+    const next = stateRef.current.coins - amount;
+    setCoins(next);
+    persistState({ coins: next });
+    return true;
   }, [persistState]);
 
   const addDiamonds = useCallback((amount: number) => {
     if (amount <= 0) return;
-    setDiamonds((prev) => {
-      const next = prev + amount;
-      persistState({ diamonds: next });
-      return next;
-    });
+    const next = stateRef.current.diamonds + amount;
+    setDiamonds(next);
+    persistState({ diamonds: next });
   }, [persistState]);
 
   const spendDiamonds = useCallback((amount: number): boolean => {
     if (amount <= 0) return true;
-    let success = false;
-    setDiamonds((prev) => {
-      if (prev < amount) {
-        success = false;
-        return prev;
-      }
-      success = true;
-      const next = prev - amount;
-      persistState({ diamonds: next });
-      return next;
-    });
-    return success;
+    if (stateRef.current.diamonds < amount) return false;
+    const next = stateRef.current.diamonds - amount;
+    setDiamonds(next);
+    persistState({ diamonds: next });
+    return true;
   }, [persistState]);
 
   const useHeart = useCallback((): number => {
@@ -167,37 +153,26 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const addHearts = useCallback((amount: number) => {
     if (amount <= 0) return;
-    setHearts((prev) => {
-      // Hard cap at 5 hearts max
-      const next = Math.min(5, prev + amount);
-      heartsRef.current = next;
-      persistState({ hearts: next });
-      return next;
-    });
+    // Hard cap at 5 hearts max
+    const next = Math.min(5, heartsRef.current + amount);
+    heartsRef.current = next;
+    setHearts(next);
+    persistState({ hearts: next });
   }, [persistState]);
 
   const addHints = useCallback((amount: number) => {
     if (amount <= 0) return;
-    setHints((prev) => {
-      const next = prev + amount;
-      persistState({ hints: next });
-      return next;
-    });
+    const next = stateRef.current.hints + amount;
+    setHints(next);
+    persistState({ hints: next });
   }, [persistState]);
 
   const useHint = useCallback((): boolean => {
-    let success = false;
-    setHints((prev) => {
-      if (prev <= 0) {
-        success = false;
-        return 0;
-      }
-      success = true;
-      const next = prev - 1;
-      persistState({ hints: next });
-      return next;
-    });
-    return success;
+    if (stateRef.current.hints <= 0) return false;
+    const next = stateRef.current.hints - 1;
+    setHints(next);
+    persistState({ hints: next });
+    return true;
   }, [persistState]);
 
   const setUnlimitedHearts = useCallback((enabled: boolean) => {
