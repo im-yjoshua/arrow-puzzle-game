@@ -371,8 +371,8 @@ const HomeScreen = ({ onPlay, onOpenSettings, onOpenDailyReward }) => {
   return (
     <SafeAreaViewContext style={[styles.homeContainer, { backgroundColor: theme.background }]}>
       <View style={styles.homeTopBar}>
-        <JuicyButton style={[styles.homeDailyButton, { backgroundColor: theme.card }]} onPress={onOpenDailyReward}>
-          <Text style={[styles.homeDailyText, { color: theme.text }]}>🎁 Rewards</Text>
+        <JuicyButton style={[styles.homeIconButton, { backgroundColor: theme.card }]} onPress={onOpenDailyReward}>
+          <Text style={styles.homeIconText}>🎁</Text>
         </JuicyButton>
 
         <View style={styles.navStats}>
@@ -391,9 +391,10 @@ const HomeScreen = ({ onPlay, onOpenSettings, onOpenDailyReward }) => {
             </Text>
           </View>
         </View>
+        <View style={styles.navSpacer} />
 
-        <JuicyButton style={[styles.homeSettingsButton, { backgroundColor: theme.card }]} onPress={onOpenSettings}>
-          <Text style={styles.homeSettingsText}>⚙️</Text>
+        <JuicyButton style={[styles.homeIconButton, { backgroundColor: theme.card }]} onPress={onOpenSettings}>
+          <Text style={styles.homeIconText}>⚙️</Text>
         </JuicyButton>
       </View>
       
@@ -2102,52 +2103,42 @@ const styles = StyleSheet.create({
   },
   homeContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    // Top bar is in normal flow (safe-area inset comes from the SafeAreaView);
+    // homeContent centers itself in the leftover space via flex: 1.
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
   },
+  // In-flow top bar: no magic absolute offsets, so it respects the real
+  // safe-area inset on every device (notch, Dynamic Island, SE).
   homeTopBar: {
-    position: 'absolute',
-    top: 50,
-    left: 14,
-    right: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  homeDailyButton: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
   },
-  homeDailyText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#4A3B32',
-  },
-  homeSettingsButton: {
-    padding: 8,
+  homeIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#FFF',
-    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
   },
-  homeSettingsText: {
+  homeIconText: {
     fontSize: 20,
   },
   homeContent: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   homeTitle: {
     fontSize: 36,
