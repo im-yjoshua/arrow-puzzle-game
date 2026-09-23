@@ -378,15 +378,15 @@ const HomeScreen = ({ onPlay, onOpenSettings, onOpenDailyReward }) => {
         <View style={styles.navStats}>
           <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
             <Text style={styles.navEmoji}>🪙</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>{currency.coins}</Text>
+            <Text style={[styles.navStatText, { color: theme.text }]} numberOfLines={1}>{formatCompact(currency.coins)}</Text>
           </View>
           <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
             <Text style={styles.navEmoji}>💎</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>{currency.diamonds || 0}</Text>
+            <Text style={[styles.navStatText, { color: theme.text }]} numberOfLines={1}>{formatCompact(currency.diamonds || 0)}</Text>
           </View>
           <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
             <Text style={styles.navEmoji}>❤️</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>
+            <Text style={[styles.navStatText, { color: theme.text }]} numberOfLines={1}>
               {currency.hasUnlimitedHearts || currency.unlimitedHearts ? '∞' : currency.hearts}
             </Text>
           </View>
@@ -681,6 +681,15 @@ const DottedGridCanvas = React.memo(({ isComplete = false, onWaveComplete, cellA
 // changes identity when the arrows or columns change.
 
 const HYPE_WORDS = ["Great!", "Amazing!", "Fabulous!", "Perfect!"];
+
+// Compact currency display so stat pills never grow wide enough to collide
+// in the navbar (1763 -> "1763", 1500 -> "1.5K", 2300000 -> "2.3M").
+function formatCompact(n) {
+  const num = typeof n === 'number' && !isNaN(n) ? n : 0;
+  if (num >= 1e6) return (num / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (num >= 1e3) return (num / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(Math.floor(num));
+}
 
 // Star rating for a completed level: 3 for a flawless run, 2 for a couple of
 // slips, 1 for finishing at all.
@@ -1432,27 +1441,19 @@ const GameScreen = ({ onBack }) => {
         <View style={styles.navStats}>
           <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
             <Text style={styles.navEmoji}>🪙</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>{currency.coins}</Text>
+            <Text style={[styles.navStatText, { color: theme.text }]} numberOfLines={1}>{formatCompact(currency.coins)}</Text>
           </View>
           <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
             <Text style={styles.navEmoji}>💎</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>{currency.diamonds || 0}</Text>
-          </View>
-          <View style={[styles.navPill, { backgroundColor: theme.pillBg }]}>
-            <Text style={styles.navEmoji}>❤️</Text>
-            <Text style={[styles.navStatText, { color: theme.text }]}>
-              {currency.hasUnlimitedHearts || currency.unlimitedHearts ? '∞' : currency.hearts}
-            </Text>
+            <Text style={[styles.navStatText, { color: theme.text }]} numberOfLines={1}>{formatCompact(currency.diamonds || 0)}</Text>
           </View>
         </View>
-        <Text style={[styles.levelText, { color: theme.textSecondary }]}>
-          {activeDifficulty === 'extraHard' ? 'EX-HARD' : activeDifficulty.toUpperCase()} • Lvl {activeLevel}
-        </Text>
+        <View style={styles.navSpacer} />
         <JuicyButton style={styles.howToPlayButton} onPress={replayTutorial}>
           <Text style={styles.howToPlayButtonText}>?</Text>
         </JuicyButton>
-        <JuicyButton style={styles.shopButton} onPress={() => setShopVisible(true)}>
-          <Text style={styles.shopButtonText}>Shop</Text>
+        <JuicyButton style={styles.shopIconButton} onPress={() => setShopVisible(true)}>
+          <Text style={styles.shopIconText}>🛒</Text>
         </JuicyButton>
       </View>
 
@@ -1470,8 +1471,8 @@ const GameScreen = ({ onBack }) => {
             ))
           )}
         </View>
-        <Text style={[styles.blocksLeftText, { color: theme.textSecondary }]}>
-          {isGenerating ? 'Building maze...' : `${blocksLeft} arrows remaining`}
+        <Text style={[styles.blocksLeftText, { color: theme.textSecondary }]} numberOfLines={1}>
+          {isGenerating ? 'Building maze...' : `${activeDifficulty === 'extraHard' ? 'EX-HARD' : activeDifficulty.toUpperCase()} · Lvl ${activeLevel} · ${blocksLeft} arrows remaining`}
         </Text>
         {/* Fixed-height slot: the combo meter mounts/unmounts as combos chain
             and break, and without reserved space every appearance pushed the
@@ -2254,36 +2255,40 @@ const styles = StyleSheet.create({
   },
   navBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 8,
+    gap: 8,
   },
   backButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#FFF',
-    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
   },
   backButtonText: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#261E1A',
   },
   navStats: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
   },
   navPill: {
     flexDirection: 'row',
     backgroundColor: '#FFF',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -2291,6 +2296,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
     gap: 4,
+    flexShrink: 1,
   },
   navEmoji: {
     fontSize: 13,
@@ -2299,34 +2305,44 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: '#261E1A',
+    flexShrink: 1,
   },
-  levelText: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#7A6E65',
+  // Flexible spacer that absorbs all leftover row width so the action
+  // buttons hug the right edge on every screen width (SE -> Pro Max).
+  navSpacer: {
+    flex: 1,
   },
-  shopButton: {
+  shopIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#261E1A',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
   },
-  shopButtonText: {
-    color: '#F3EBE1',
-    fontWeight: '800',
-    fontSize: 13,
+  shopIconText: {
+    fontSize: 18,
   },
   howToPlayButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#8EAA78',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
   },
   howToPlayButtonText: {
     color: '#261E1A',
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 16,
   },
   header: {
     alignItems: 'center',
