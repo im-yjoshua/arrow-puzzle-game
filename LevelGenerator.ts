@@ -231,17 +231,14 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
       remaining.delete(`${c.r},${c.c}`);
     }
 
-    let blockDir: Direction = best.dir;
-    if (best.snake.length >= 2) {
-      const h = best.snake[best.snake.length - 1];
-      const p = best.snake[best.snake.length - 2];
-      const dr = h.r - p.r;
-      const dc = h.c - p.c;
-      if (dc > 0) blockDir = 'right';
-      else if (dr > 0) blockDir = 'down';
-      else if (dc < 0) blockDir = 'left';
-      else if (dr < 0) blockDir = 'up';
-    }
+    // The escape direction `best.dir` is guaranteed clear BY CONSTRUCTION: when this
+    // block was placed, its head target was off-board or a cell owned by an
+    // EARLIER-placed block — so removing blocks in forward placement order always
+    // solves the level (each block's target is empty by the time it's its turn).
+    // Store it as the arrow's direction. (Deriving direction from body geometry
+    // instead could disagree with the guaranteed-clear direction and produce
+    // unsolvable-looking boards.)
+    const blockDir: Direction = best.dir;
 
     const block: Block = {
       type: 'arrow',
@@ -267,10 +264,16 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
 }
 
 /**
- * Resolves orthogonal facing direction (up, down, left, right)
- * by comparing the coordinates of the head and the segment immediately preceding it.
+ * Resolves an arrow's facing direction.
+ *
+ * Prefers the generator-stored escape direction, which is guaranteed clear by
+ * construction (see tryGenerateLevel). Falls back to body geometry only for
+ * arrow objects built without a stored direction.
  */
 export function getArrowDirection(arrow: Block): Direction {
+  if (arrow && arrow.direction) {
+    return arrow.direction;
+  }
   if (!arrow || !arrow.cells || arrow.cells.length < 2) {
     return arrow?.direction || 'right';
   }

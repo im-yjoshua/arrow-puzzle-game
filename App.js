@@ -660,12 +660,16 @@ const FloatingText = React.memo(({ id, text, x, y, rotation, onComplete }) => {
   );
 });
 
-// Calculate final orthogonal direction strictly by comparing the X/Y coordinates of the arrow's last two grid tiles.
-// Forces absolute orthogonal angles: 0° (right), 90° (down), 180° (left), or 270° (up).
-// Eliminates any diagonal angles (e.g., 45 degrees) or path tangent overflows.
+// Resolve an arrow's facing direction.
+// The generator stores each arrow's guaranteed-clear escape direction at build time
+// (levels are solvable by construction), so the stored direction is authoritative.
+// Body geometry is only a fallback for arrow objects built without one.
 export const getArrowOrthogonalDirection = (arrow) => {
+  if (arrow && arrow.direction) {
+    return arrow.direction;
+  }
   if (!arrow || !arrow.cells || arrow.cells.length < 2) {
-    return arrow?.direction || 'right';
+    return 'right';
   }
   const cells = arrow.cells;
   const N = cells.length;
