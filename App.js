@@ -836,6 +836,13 @@ const GameScreen = ({ onBack }) => {
     };
   }, [activeDifficulty]);
 
+  // Celebration finished -> show the win chest (RewardModal). The actual advance to
+  // the next level happens after the chest, via handleNextLevel.
+  const handleCelebrationDone = React.useCallback(() => {
+    setIsLevelComplete(false);
+    setIsWon(true);
+  }, []);
+
   const handleWaveComplete = React.useCallback(() => {
     try {
       // 1. Award coins silently in-memory (stripping any broken AsyncStorage writes)
@@ -1132,24 +1139,32 @@ const GameScreen = ({ onBack }) => {
     setBlocksLeft(prev => prev - 1);
   };
 
+  // Win chest "Next Level" -> interstitial every 3rd level, then advance.
+  // Ad failures can't soft-lock: AdService guarantees onClose fires (error/timeout).
   const handleNextLevel = () => {
     if (activeLevel % 3 === 0) {
       AdService.showInterstitial(() => {
-        levelUp();
+        handleWaveComplete();
       });
     } else {
-      levelUp();
+      handleWaveComplete();
     }
   };
 
   const handleWatchAdRevive = () => {
-    AdService.showRewarded(() => {
-      setHearts(3);
-      setIsGameOver(false);
-      if (settings.haptics) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    AdService.showRewarded(
+      () => {
+        setHearts(3);
+        setIsGameOver(false);
+        if (settings.haptics) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      },
+      null,
+      () => {
+        Alert.alert('Ad unavailable', 'The ad could not be loaded. Check your connection and try again.');
       }
-    });
+    );
   };
 
   const triggerHintHighlight = () => {
@@ -1185,6 +1200,10 @@ const GameScreen = ({ onBack }) => {
       },
       () => {
         setIsAdLoading(false);
+      },
+      () => {
+        setIsAdLoading(false);
+        Alert.alert('Ad unavailable', 'The ad could not be loaded. Check your connection and try again.');
       }
     );
   };
@@ -1223,9 +1242,15 @@ const GameScreen = ({ onBack }) => {
         <Text style={styles.outOfLivesTitle}>Out of Lives 💔</Text>
         <Text style={styles.outOfLivesSub}>Take a cozy break!</Text>
         <JuicyButton style={styles.refillButton} onPress={() => {
-          AdService.showRewarded(() => {
-            useStore.setState({ lives: 5 });
-          });
+          AdService.showRewarded(
+            () => {
+              useStore.setState({ lives: 5 });
+            },
+            null,
+            () => {
+              Alert.alert('Ad unavailable', 'The ad could not be loaded. Check your connection and try again.');
+            }
+          );
         }}>
           <Text style={styles.refillText}>Watch Ad to Restore Lives</Text>
         </JuicyButton>
@@ -1363,7 +1388,7 @@ const GameScreen = ({ onBack }) => {
 
           {/* Celebratory glowing text & bottom-screen confetti cannon overlay */}
           {isLevelComplete && (
-            <CelebrationOverlay onCelebrationDone={handleWaveComplete} />
+            <CelebrationOverlay onCelebrationDone={handleCelebrationDone} />
           )}
         </View>
       </View>

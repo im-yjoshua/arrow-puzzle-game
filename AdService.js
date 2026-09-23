@@ -42,59 +42,102 @@ export const AdService = {
     }
   },
 
-  showInterstitial: (onClose) => {
-    if (isNativeAdMobAvailable) {
-      const interstitial = InterstitialAd.createForAdRequest(interstitialAdId, { requestNonPersonalizedAdsOnly: true });
-      const unsubscribe = interstitial.addAdEventListener(AdEventType.LOADED, () => {
-        interstitial.show();
-      });
-      const unsubscribeClose = interstitial.addAdEventListener(AdEventType.CLOSED, () => {
-        if (onClose) onClose();
-        unsubscribe();
-        unsubscribeClose();
-      });
-      interstitial.load();
-    } else {
+  // Safety net: if an ad neither loads nor errors within this window, treat it as
+  // failed so the game can never soft-lock waiting on an ad callback.
+  _AD_TIMEOUT_MS: 15000,
+
+  // onClose always fires exactly once (ad closed, failed, or timed out).
+  // onError fires only on failure/timeout, before onClose.
+  showInterstitial: (onClose, onError) => {
+    if (!isNativeAdMobAvailable) {
       console.log("Mock Interstitial Ad: Showing and closing...");
       setTimeout(() => { if (onClose) onClose(); }, 1000);
+      return;
+    }
+    const interstitial = InterstitialAd.createForAdRequest(interstitialAdId, { requestNonPersonalizedAdsOnly: true });
+    let finished = false;
+    let unsubscribeLoaded, unsubscribeClosed, unsubscribeError;
+    const cleanup = () => {
+      clearTimeout(safetyTimer);
+      if (unsubscribeLoaded) unsubscribeLoaded();
+      if (unsubscribeClosed) unsubscribeClosed();
+      if (unsubscribeError) unsubscribeError();
+    };
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      if (error) {
+        console.warn('[Ads] Interstitial failed:', error && error.message ? error.message : error);
+        if (onError) { try { onError(error); } catch (_) {} }
+      }
+      if (onClose) { try { onClose(); } catch (_) {} }
+    };
+    const safetyTimer = setTimeout(() => finish(new Error('ad load timeout')), AdService._AD_TIMEOUT_MS);
+    unsubscribeLoaded = interstitial.addAdEventListener(AdEventType.LOADED, () => {
+      try {
+        interstitial.show();
+      } catch (e) {
+        finish(e);
+      }
+    });
+    unsubscribeClosed = interstitial.addAdEventListener(AdEventType.CLOSED, () => finish());
+    unsubscribeError = interstitial.addAdEventListener(AdEventType.ERROR, (error) => finish(error));
+    try {
+      interstitial.load();
+    } catch (e) {
+      finish(e);
     }
   },
 
-  showRewarded: (onReward, onClose) => {
-    if (isNativeAdMobAvailable) {
-      const rewarded = RewardedAd.createForAdRequest(rewardedAdId, { requestNonPersonalizedAdsOnly: true });
-      let rewardedUser = false;
-      let unsubscribeClose, unsubscribeLoaded, unsubscribeEarned, unsubscribeError;
-      const cleanup = () => {
-        if (unsubscribeLoaded) unsubscribeLoaded();
-        if (unsubscribeEarned) unsubscribeEarned();
-        if (unsubscribeClose) unsubscribeClose();
-        if (unsubscribeError) unsubscribeError();
-      };
-      unsubscribeLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
-        rewarded.show();
-      });
-      unsubscribeEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, reward => {
-        rewardedUser = true;
-        if (onReward) onReward(reward);
-      });
-      unsubscribeClose = rewarded.addAdEventListener(AdEventType.CLOSED, () => {
-        if (!rewardedUser && onClose) onClose(); // called if closed without reward
-        else if (onClose) onClose();
-        cleanup();
-      });
-      unsubscribeError = rewarded.addAdEventListener(AdEventType.ERROR, (error) => {
-        console.warn("Rewarded ad error:", error);
-        if (onClose) onClose();
-        cleanup();
-      });
-      rewarded.load();
-    } else {
+  showRewarded: (onReward, onClose, onError) => {
+    if (!isNativeAdMobAvailable) {
       console.log("Mock Rewarded Ad: User watched ad. Granting reward...");
       setTimeout(() => {
         if (onReward) onReward();
         if (onClose) onClose();
       }, 1500);
+      return;
+    }
+    const rewarded = RewardedAd.createForAdRequest(rewardedAdId, { requestNonPersonalizedAdsOnly: true });
+    let rewardedUser = false;
+    let finished = false;
+    let unsubscribeLoaded, unsubscribeEarned, unsubscribeClose, unsubscribeError;
+    const cleanup = () => {
+      clearTimeout(safetyTimer);
+      if (unsubscribeLoaded) unsubscribeLoaded();
+      if (unsubscribeEarned) unsubscribeEarned();
+      if (unsubscribeClose) unsubscribeClose();
+      if (unsubscribeError) unsubscribeError();
+    };
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      if (error) {
+        console.warn('[Ads] Rewarded failed:', error && error.message ? error.message : error);
+        if (onError) { try { onError(error); } catch (_) {} }
+      }
+      if (onClose) { try { onClose(); } catch (_) {} }
+    };
+    const safetyTimer = setTimeout(() => finish(new Error('ad load timeout')), AdService._AD_TIMEOUT_MS);
+    unsubscribeLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      try {
+        rewarded.show();
+      } catch (e) {
+        finish(e);
+      }
+    });
+    unsubscribeEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, reward => {
+      rewardedUser = true;
+      if (onReward) { try { onReward(reward); } catch (_) {} }
+    });
+    unsubscribeClose = rewarded.addAdEventListener(AdEventType.CLOSED, () => finish());
+    unsubscribeError = rewarded.addAdEventListener(AdEventType.ERROR, (error) => finish(error));
+    try {
+      rewarded.load();
+    } catch (e) {
+      finish(e);
     }
   }
 };
