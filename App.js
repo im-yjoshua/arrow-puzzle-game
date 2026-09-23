@@ -8,10 +8,6 @@ import Animated, {
   withTiming, 
   withRepeat,
   withSpring, 
-  SlideOutUp, 
-  SlideOutDown, 
-  SlideOutLeft, 
-  SlideOutRight,
   FadeIn,
   ZoomIn,
   interpolateColor, withDelay,
@@ -37,10 +33,9 @@ import { CurrencyProvider, useCurrency } from './CurrencyContext';
 import CelebrationOverlay from './CelebrationOverlay';
 import ShopModal from './ShopModal';
 import PurchasesManager from './PurchasesManager';
-import Svg, { Path, Polygon } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
-const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
 const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 LogBox.ignoreLogs(['[Reanimated] Initial values for animation are missing']);
@@ -770,7 +765,7 @@ const GameScreen = ({ onBack }) => {
     setFloatingTexts(prev => prev.filter(item => item.id !== id));
   }, []);
 
-  const { coins, diamonds, lives, currentLevel, activeDifficulty, levelUp, removeLife, settings, addCoins, spendDiamonds } = useStore();
+  const { lives, currentLevel, activeDifficulty, levelUp, settings, addCoins, spendDiamonds } = useStore();
   const currency = useCurrency();
   
   const activeLevel = typeof currentLevel === 'object' && currentLevel !== null
@@ -808,11 +803,6 @@ const GameScreen = ({ onBack }) => {
   const arrowLayerAnimatedStyle = useAnimatedStyle(() => ({
     opacity: boardFadeOpacity.value,
   }));
-
-  const handleRetry = () => {
-    // restart level
-    initLevel();
-  };
 
   const buildLevelMatrix = React.useCallback((levelNum, diff = activeDifficulty) => {
     const level = generateLevel(diff);
@@ -1240,9 +1230,6 @@ const GameScreen = ({ onBack }) => {
         }}>
           <Text style={styles.refillText}>Watch Ad to Restore Lives</Text>
         </JuicyButton>
-        <JuicyButton style={[styles.refillButton, { marginTop: 15, backgroundColor: 'rgba(0,0,0,0.1)'}]} onPress={() => useStore.setState({ lives: 5 })}>
-          <Text style={styles.refillText}>Free Refill (Debug)</Text>
-        </JuicyButton>
         <JuicyButton style={[styles.refillButton, { marginTop: 15, backgroundColor: '#FFF'}]} onPress={onBack}>
           <Text style={[styles.refillText, { color: '#7A7A7A' }]}>Back to Home</Text>
         </JuicyButton>
@@ -1588,102 +1575,6 @@ const RewardModal = ({ visible, onNextLevel }) => {
   );
 };
 
-const ShopAndCollectionModal = ({ visible, onClose }) => {
-  const [mode, setMode] = useState('shop'); 
-  const [category, setCategory] = useState('background'); 
-  const { coins, collection, removeCoins, addItem, equipItem, equippedBackground, settings } = useStore();
-  const currency = useCurrency();
-
-  const handleAction = (item) => {
-    const isOwned = collection.find(i => i.id === item.id);
-    if (isOwned) {
-      equipItem(item);
-      if (settings.haptics) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return;
-    }
-
-    if (item.rarity === 'epic' || item.rarity === 'mythic') {
-      if (settings.haptics) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return;
-    }
-    
-    if (currency.spendCoins(item.price)) {
-      removeCoins(item.price);
-      addItem(item);
-      if (settings.haptics) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      if (settings.haptics) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
-  };
-
-  const activeItems = mode === 'shop' 
-    ? CATALOG.filter(item => item.type === category)
-    : collection.filter(item => item.type === category);
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <SafeAreaViewContext style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
-          <View style={styles.modeTabs}>
-            <JuicyButton onPress={() => setMode('shop')}><Text style={[styles.modeText, mode === 'shop' && styles.modeTextActive]}>Shop</Text></JuicyButton>
-            <Text style={styles.modeText}> / </Text>
-            <JuicyButton onPress={() => setMode('collection')}><Text style={[styles.modeText, mode === 'collection' && styles.modeTextActive]}>Collection</Text></JuicyButton>
-          </View>
-          <View style={styles.modalCoins}>
-            <Text style={styles.modalCoinsText}>{currency.coins} 🪙</Text>
-          </View>
-          <JuicyButton style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>✕</Text>
-          </JuicyButton>
-        </View>
-
-        <View style={styles.tabBar}>
-          <JuicyButton style={[styles.tabButton, category === 'background' && styles.tabButtonActive]} onPress={() => setCategory('background')}>
-            <Text style={[styles.tabText, category === 'background' && styles.tabTextActive]}>Background Mats</Text>
-          </JuicyButton>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.scrollGrid}>
-          {activeItems.length === 0 ? (
-            <Text style={styles.emptyText}>No items found in this section!</Text>
-          ) : (
-            activeItems.map(item => {
-              const owned = collection.find(i => i.id === item.id);
-              const isEpicOrMythic = item.rarity === 'epic' || item.rarity === 'mythic';
-              const isEquipped = item.id === equippedBackground;
-
-              return (
-                <View key={item.id} style={[styles.itemCard, !owned && isEpicOrMythic && styles.itemCardPremium]}>
-                  <Image source={item.image} style={[styles.catalogImage, !owned && isEpicOrMythic && styles.emojiDim]} />
-                  <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                  
-                  <JuicyButton 
-                    style={[
-                      styles.buyButton, 
-                      owned && styles.buyButtonOwned,
-                      !owned && isEpicOrMythic && styles.buyButtonPremium,
-                      isEquipped && styles.buyButtonEquipped
-                    ]}
-                    onPress={() => handleAction(item)}
-                  >
-                    <Text style={[styles.buyText, isEquipped && styles.buyTextEquipped]}>
-                      {isEquipped ? 'Equipped' : 
-                       owned ? 'Equip' : 
-                       isEpicOrMythic ? '🔒 Chest Drop Only' : 
-                       `${item.price} 🪙`}
-                    </Text>
-                  </JuicyButton>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
-      </SafeAreaViewContext>
-    </Modal>
-  );
-};
-
-
 const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedValue, cellSize = CELL_SIZE, rows = ROWS, cols = COLS, activeDifficulty = 'medium' }, ref) => {
   const wiggle = useSharedValue(0);
   const isGreen = useSharedValue(0);
@@ -1984,10 +1875,6 @@ const styles = StyleSheet.create({
   homeContent: {
     alignItems: 'center',
   },
-  homeLogo: {
-    fontSize: 70,
-    marginBottom: 10,
-  },
   homeTitle: {
     fontSize: 36,
     fontWeight: '900',
@@ -2259,35 +2146,6 @@ const styles = StyleSheet.create({
     color: '#7A6E65',
     letterSpacing: 0.5,
   },
-  arrowContainer: {
-    position: 'absolute',
-    backgroundColor: 'transparent',
-  },
-  arrowButton: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.001)', // full touch hit target
-  },
-  overlayBanner: {
-    position: 'absolute',
-    top: 60,
-    alignSelf: 'center',
-    backgroundColor: '#FFF',
-    paddingHorizontal: 36,
-    paddingVertical: 26,
-    borderRadius: 24,
-    zIndex: 100,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: '#E8E2D9',
-  },
-  failBanner: {
-    backgroundColor: '#FFF',
-  },
   gameOverBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(20, 15, 12, 0.75)',
@@ -2393,18 +2251,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 18,
   },
-  failText: {
-    color: '#261E1A',
-    fontSize: 26,
-    fontWeight: '800',
-    marginBottom: 5,
-  },
-  failSubText: {
-    color: '#7A6E65',
-    fontSize: 15,
-    marginBottom: 18,
-    fontWeight: '600',
-  },
   retryButton: {
     backgroundColor: '#261E1A',
     paddingHorizontal: 26,
@@ -2492,9 +2338,6 @@ const styles = StyleSheet.create({
     color: '#8EAA78',
     fontWeight: 'bold',
     marginBottom: 4,
-  },
-  rareDropEmoji: {
-    fontSize: 36,
   },
   rareDropName: {
     marginTop: 4,
@@ -2660,12 +2503,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#F3EBE1',
     fontSize: 13,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#F3EBE1',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   floatingTextContainer: {
     position: 'absolute',
