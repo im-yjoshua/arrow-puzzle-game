@@ -772,6 +772,21 @@ const GameScreen = ({ onBack }) => {
   const [hasSeenTutorial, setHasSeenTutorial] = useState(true);
   const [isTutorialActive, setIsTutorialActive] = useState(false);
   const tutorialRef = React.useRef(null);
+  // Bumped to replay the tutorial on demand (fresh overlay state each run).
+  const [tutorialRunId, setTutorialRunId] = useState(0);
+
+  // Final tutorial dismissal: hide + remember that the player has seen it.
+  const handleTutorialDone = React.useCallback(() => {
+    setIsTutorialActive(false);
+    AsyncStorage.setItem('hasSeenTutorial', 'true').catch(() => {});
+    setHasSeenTutorial(true);
+  }, []);
+
+  // Persistent "How to Play" entry: replay the tutorial on the current board.
+  const replayTutorial = React.useCallback(() => {
+    setTutorialRunId((id) => id + 1);
+    setIsTutorialActive(true);
+  }, []);
 
   // Ensure each arrow has a shared value for slither progress & dot reveal synchronization
   for (const arrow of activeArrowsState) {
@@ -797,12 +812,15 @@ const GameScreen = ({ onBack }) => {
     ? (currentLevel[activeDifficulty] || 1)
     : (typeof currentLevel === 'number' ? currentLevel : 1);
 
-  // Check hasSeenTutorial flag from AsyncStorage on mount / level change
+  // Check hasSeenTutorial flag from AsyncStorage on mount / level change.
+  // The tutorial auto-shows on the first level the player ever opens, on any
+  // difficulty (the default is medium, so gating on easy would skip most
+  // new players entirely).
   useEffect(() => {
     AsyncStorage.getItem('hasSeenTutorial').then((val) => {
       const seen = val === 'true';
       setHasSeenTutorial(seen);
-      if (!seen && activeLevel === 1 && activeDifficulty === 'easy') {
+      if (!seen && activeLevel === 1) {
         setIsTutorialActive(true);
       } else {
         setIsTutorialActive(false);
@@ -1140,11 +1158,10 @@ const GameScreen = ({ onBack }) => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
 
-        // On the very first successful arrow tap ('canMove' == true), dismiss tutorial
+        // On the very first successful arrow tap, advance the tutorial to step 2
+        // (combo/hearts/hints). The overlay's "Got it!" finishes the tutorial.
         if (isTutorialActive) {
-          tutorialRef.current?.dismiss();
-          AsyncStorage.setItem('hasSeenTutorial', 'true').catch(() => {});
-          setHasSeenTutorial(true);
+          tutorialRef.current?.nextStep();
         }
         // Instantly clear footprints so arrows behind can slither simultaneously
         setGrid(prevGrid => {
@@ -1362,6 +1379,9 @@ const GameScreen = ({ onBack }) => {
         <Text style={[styles.levelText, { color: theme.textSecondary }]}>
           {activeDifficulty === 'extraHard' ? 'EX-HARD' : activeDifficulty.toUpperCase()} • Lvl {activeLevel}
         </Text>
+        <JuicyButton style={styles.howToPlayButton} onPress={replayTutorial}>
+          <Text style={styles.howToPlayButtonText}>?</Text>
+        </JuicyButton>
         <JuicyButton style={styles.shopButton} onPress={() => setShopVisible(true)}>
           <Text style={styles.shopButtonText}>Shop</Text>
         </JuicyButton>
@@ -1453,13 +1473,14 @@ const GameScreen = ({ onBack }) => {
                   ))
                 )}
 
-                {isTutorialActive && activeLevel === 1 && activeDifficulty === 'easy' && !isWon && (
+                {isTutorialActive && !isWon && (
                   <TutorialOverlay
+                    key={tutorialRunId}
                     ref={tutorialRef}
                     targetArrow={targetTutorialArrow}
                     dynamicCellSize={dynamicCellSize}
                     screenWidth={width}
-                    onDismissed={() => setIsTutorialActive(false)}
+                    onDismissed={handleTutorialDone}
                   />
                 )}
               </>
@@ -1553,25 +1574,25 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
   const pulse = useSharedValue(1);
   const opacity = useSharedValue(1);
   const [isDismissed, setIsDismissed] = useState(false);
+  const [step, setStep] = useState(0);
+
+  const dismiss = React.useCallback(() => {
+    opacity.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.quad) });
+    setTimeout(() => {
+      setIsDismissed(true);
+      if (typeof onDismissed === 'function') {
+        try {
+          onDismissed();
+        } catch (_) {}
+      }
+    }, 350);
+  }, [onDismissed]);
 
   React.useImperativeHandle(ref, () => ({
-    dismiss: (cb) => {
-      opacity.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.quad) });
-      setTimeout(() => {
-        setIsDismissed(true);
-        if (typeof onDismissed === 'function') {
-          try {
-            onDismissed();
-          } catch (_) {}
-        }
-        if (typeof cb === 'function') {
-          try {
-            cb();
-          } catch (_) {}
-        }
-      }, 350);
-    }
-  }));
+    dismiss,
+    // Advance from the "tap to slide" pointer to the how-to-play card.
+    nextStep: () => setStep(1),
+  }), [dismiss]);
 
   useEffect(() => {
     pulse.value = withRepeat(
@@ -1593,7 +1614,25 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
 
   if (isDismissed) return null;
 
-  // Dynamically calculate position: anchor inward with right: 15 if target arrow is on right half of screen
+  // Step 2: centered how-to-play card with a Got it! button.
+  if (step >= 1) {
+    return (
+      <View style={styles.tutorialOverlay} pointerEvents="none">
+        <View style={styles.tutorialCard} pointerEvents="auto">
+          <Text style={styles.tutorialCardTitle}>How to play</Text>
+          <Text style={styles.tutorialCardLine}>👆 Tap an arrow to slide it out of the maze</Text>
+          <Text style={styles.tutorialCardLine}>🔥 Tap fast to chain COMBO coins</Text>
+          <Text style={styles.tutorialCardLine}>❤️ Wrong taps cost a heart</Text>
+          <Text style={styles.tutorialCardLine}>💡 Stuck? Spend a hint to reveal a move</Text>
+          <JuicyButton style={styles.tutorialGotIt} onPress={dismiss}>
+            <Text style={styles.tutorialGotItText}>Got it!</Text>
+          </JuicyButton>
+        </View>
+      </View>
+    );
+  }
+
+  // Step 1: pulsing pointer anchored at a movable arrow.
   let pointerPosStyle = {};
   if (targetArrow && targetArrow.cells && targetArrow.cells.length > 0) {
     const head = targetArrow.cells[targetArrow.cells.length - 1];
@@ -1615,8 +1654,13 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
   return (
     <View style={styles.tutorialOverlay} pointerEvents="none">
       <Animated.View style={[styles.tutorialPointer, pointerPosStyle, animStyle]} pointerEvents="none">
-        <Text style={styles.tutorialText}>Tap to slide!</Text>
+        <Text style={styles.tutorialText}>Tap an arrow to slide it out!</Text>
       </Animated.View>
+      <View style={styles.tutorialSkipWrap} pointerEvents="auto">
+        <JuicyButton style={styles.tutorialSkip} onPress={dismiss}>
+          <Text style={styles.tutorialSkipText}>Skip</Text>
+        </JuicyButton>
+      </View>
     </View>
   );
 });
@@ -2206,6 +2250,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 13,
   },
+  howToPlayButton: {
+    backgroundColor: '#8EAA78',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    marginRight: 8,
+  },
+  howToPlayButtonText: {
+    color: '#261E1A',
+    fontWeight: '800',
+    fontSize: 13,
+  },
   header: {
     alignItems: 'center',
     marginBottom: 10,
@@ -2624,6 +2680,63 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#F3EBE1',
     fontSize: 13,
+  },
+  tutorialSkipWrap: {
+    position: 'absolute',
+    top: 8,
+    right: 12,
+    zIndex: 61,
+  },
+  tutorialSkip: {
+    backgroundColor: 'rgba(38, 30, 26, 0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  tutorialSkipText: {
+    color: '#F3EBE1',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  tutorialCard: {
+    position: 'absolute',
+    top: '28%',
+    left: 32,
+    right: 32,
+    backgroundColor: '#F3EBE1',
+    borderRadius: 18,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 10,
+    zIndex: 62,
+  },
+  tutorialCardTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#261E1A',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  tutorialCardLine: {
+    fontSize: 14,
+    color: '#4A3F35',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  tutorialGotIt: {
+    backgroundColor: '#261E1A',
+    borderRadius: 14,
+    paddingVertical: 10,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  tutorialGotItText: {
+    color: '#F3EBE1',
+    fontWeight: '800',
+    fontSize: 15,
   },
   floatingTextContainer: {
     position: 'absolute',
