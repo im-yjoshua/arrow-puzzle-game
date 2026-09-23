@@ -57,13 +57,15 @@ export const DIFFICULTY_CONFIGS: Record<Difficulty, DifficultyConfig> = {
   },
 };
 
+// Perf note: cell keys are integers (r * cols + c) everywhere on the hot path —
+// no `${r},${c}` string allocations, no split/parse round-trips.
+
 // Head-Clearance Collision Logic:
 // Evaluates strictly the single grid coordinate directly in front of the arrow's head.
 // Ignores all adjacent tiles touching the arrow's tail or body.
-function canPieceEscape(cells: CellCoord[], dir: Direction, remaining: Set<string>, rows: number, cols: number): boolean {
-  const head = cells[cells.length - 1];
-  let targetR = head.r;
-  let targetC = head.c;
+function canPieceEscape(headR: number, headC: number, dir: Direction, remaining: Set<number>, rows: number, cols: number): boolean {
+  let targetR = headR;
+  let targetC = headC;
 
   // Dynamically calculate target coordinate based on facing direction
   if (dir === 'up') targetR -= 1;
@@ -77,96 +79,82 @@ function canPieceEscape(cells: CellCoord[], dir: Direction, remaining: Set<strin
   }
 
   // If on the board, unblocked if the target cell has already escaped / been cleared
-  return !remaining.has(`${targetR},${targetC}`);
+  return !remaining.has(targetR * cols + targetC);
 }
 
 // Wall-hugging score logic: favor cells adjacent to already-filled spaces or boundaries
-function getWallHugScore(r: number, c: number, remaining: Set<string>, rows: number, cols: number): number {
+function getWallHugScore(r: number, c: number, remaining: Set<number>, rows: number, cols: number): number {
   let score = 0;
-  const adj = [
-    { r: r - 1, c: c },
-    { r: r + 1, c: c },
-    { r: r, c: c - 1 },
-    { r: r, c: c + 1 },
-  ];
-  for (const a of adj) {
-    if (a.r < 0 || a.r >= rows || a.c < 0 || a.c >= cols || !remaining.has(`${a.r},${a.c}`)) {
-      score++;
-    }
-  }
+  if (r === 0 || !remaining.has((r - 1) * cols + c)) score++; // up
+  if (r === rows - 1 || !remaining.has((r + 1) * cols + c)) score++; // down
+  if (c === 0 || !remaining.has(r * cols + (c - 1))) score++; // left
+  if (c === cols - 1 || !remaining.has(r * cols + (c + 1))) score++; // right
   return score;
 }
 
 // Aggressive space-filling snake growth with wall-hugging and difficulty-based turn bias
 function growSnake(
-  head: CellCoord, 
-  dir: Direction, 
-  remaining: Set<string>, 
-  rows: number, 
-  cols: number, 
+  head: CellCoord,
+  dir: Direction,
+  remaining: Set<number>,
+  rows: number,
+  cols: number,
   maxLen: number = 25,
   turnWeight: number = 0.5
 ): CellCoord[] {
-  const has = (r: number, c: number) => remaining.has(`${r},${c}`);
   let best: CellCoord[] = [head];
 
-  for (let trial = 0; trial < 15; trial++) {
+  // The head never moves during growth and `remaining` is untouched until the block
+  // is placed, so head clearance is identical for every trial and every extension —
+  // check it once up front instead of once per extension.
+  if (!canPieceEscape(head.r, head.c, dir, remaining, rows, cols)) {
+    return best;
+  }
+
+  for (let trial = 0; trial < 3; trial++) {
     let current: CellCoord[] = [head];
-    const visited = new Set<string>([`${head.r},${head.c}`]);
+    const visited = new Set<number>([head.r * cols + head.c]);
 
     while (current.length < maxLen) {
       const tail = current[0];
-      const neighbors: CellCoord[] = [
-        { r: tail.r - 1, c: tail.c },
-        { r: tail.r + 1, c: tail.c },
-        { r: tail.r, c: tail.c - 1 },
-        { r: tail.r, c: tail.c + 1 },
-      ];
 
       // Determine current segment direction if length >= 2
       let curDr = 0;
       let curDc = 0;
       if (current.length >= 2) {
-        curDr = current[0].r - current[1].r;
-        curDc = current[0].c - current[1].c;
+        curDr = tail.r - current[1].r;
+        curDc = tail.c - current[1].c;
       }
 
-      // Sort neighbors based on wall hugging score and turn weight
-      neighbors.sort((a, b) => {
-        let scoreA = getWallHugScore(a.r, a.c, remaining, rows, cols);
-        let scoreB = getWallHugScore(b.r, b.c, remaining, rows, cols);
+      // Single linear scan over the 4 neighbors (no per-step sort): score each by
+      // wall-hugging + turn bias, keep the best. Tiny random jitter breaks ties.
+      let bestNext: CellCoord | null = null;
+      let bestScore = -Infinity;
 
+      for (let n = 0; n < 4; n++) {
+        const r = tail.r + (n === 0 ? -1 : n === 1 ? 1 : 0);
+        const c = tail.c + (n === 2 ? -1 : n === 3 ? 1 : 0);
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+        const key = r * cols + c;
+        if (!remaining.has(key) || visited.has(key)) continue;
+
+        let score = getWallHugScore(r, c, remaining, rows, cols);
         if (current.length >= 2) {
-          const isStraightA = (a.r - tail.r === curDr) && (a.c - tail.c === curDc);
-          const isStraightB = (b.r - tail.r === curDr) && (b.c - tail.c === curDc);
-
           // Low turnWeight favors straight lines; high turnWeight favors turns (curling/L-shapes)
-          const turnBiasA = isStraightA ? (1 - turnWeight) * 4 : turnWeight * 4;
-          const turnBiasB = isStraightB ? (1 - turnWeight) * 4 : turnWeight * 4;
-
-          scoreA += turnBiasA;
-          scoreB += turnBiasB;
+          const straight = r - tail.r === curDr && c - tail.c === curDc;
+          score += straight ? (1 - turnWeight) * 4 : turnWeight * 4;
         }
+        score += Math.random() * 0.001;
 
-        // Add slight randomization to tie-breaks
-        if (scoreA === scoreB) return Math.random() - 0.5;
-        return scoreB - scoreA;
-      });
-
-      let extended = false;
-      for (const n of neighbors) {
-        const nKey = `${n.r},${n.c}`;
-        if (has(n.r, n.c) && !visited.has(nKey)) {
-          const nextSnake = [n, ...current];
-          if (canPieceEscape(nextSnake, dir, remaining, rows, cols)) {
-            current = nextSnake;
-            visited.add(nKey);
-            extended = true;
-            break;
-          }
+        if (score > bestScore) {
+          bestScore = score;
+          bestNext = { r, c };
         }
       }
-      if (!extended) break;
+
+      if (!bestNext) break;
+      current = [bestNext, ...current];
+      visited.add(bestNext.r * cols + bestNext.c);
     }
 
     if (current.length > best.length) best = current;
@@ -181,10 +169,10 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
   
   const grid: (Block | null)[][] = Array(rows).fill(null).map(() => Array(cols).fill(null));
   
-  const remaining = new Set<string>();
+  const remaining = new Set<number>();
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      remaining.add(`${r},${c}`);
+      remaining.add(r * cols + c);
     }
   }
   
@@ -196,9 +184,10 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
     const candidates: { head: CellCoord; dir: Direction }[] = [];
 
     for (const key of remaining) {
-      const [hr, hc] = key.split(',').map(Number);
+      const hr = Math.floor(key / cols);
+      const hc = key % cols;
       for (const dir of dirs) {
-        if (canPieceEscape([{ r: hr, c: hc }], dir, remaining, rows, cols)) {
+        if (canPieceEscape(hr, hc, dir, remaining, rows, cols)) {
           candidates.push({ head: { r: hr, c: hc }, dir });
         }
       }
@@ -208,7 +197,14 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
       return null; // Deadlock
     }
 
-    candidates.sort(() => Math.random() - 0.5);
+    // Fisher-Yates shuffle: unbiased and O(n). (The old
+    // `sort(() => Math.random() - 0.5)` was biased and O(n log n).)
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = candidates[i];
+      candidates[i] = candidates[j];
+      candidates[j] = tmp;
+    }
     let best: { snake: CellCoord[]; dir: Direction } | null = null;
     const sampleSize = Math.min(candidates.length, 10);
 
@@ -232,7 +228,7 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
     }
 
     for (const c of best.snake) {
-      remaining.delete(`${c.r},${c.c}`);
+      remaining.delete(c.r * cols + c.c);
     }
 
     // The escape direction `best.dir` is guaranteed clear BY CONSTRUCTION: when this
@@ -323,11 +319,11 @@ export function validateBoard(arrowsArray: Block[], rows?: number, cols?: number
     cells: arrow.cells.map((c) => ({ ...c })),
   }));
 
-  // Build current occupied coordinates set
-  const occupied = new Set<string>();
+  // Build current occupied coordinates set (integer keys: r * boardCols + c)
+  const occupied = new Set<number>();
   for (const arrow of remainingArrows) {
     for (const cell of arrow.cells) {
-      occupied.add(`${cell.r},${cell.c}`);
+      occupied.add(cell.r * boardCols + cell.c);
     }
   }
 
@@ -349,12 +345,12 @@ export function validateBoard(arrowsArray: Block[], rows?: number, cols?: number
 
       // Exact player clearance logic: unblocked if target is off-board or empty
       const isOffBoard = targetR < 0 || targetR >= boardRows || targetC < 0 || targetC >= boardCols;
-      const isNextTileEmpty = isOffBoard || !occupied.has(`${targetR},${targetC}`);
+      const isNextTileEmpty = isOffBoard || !occupied.has(targetR * boardCols + targetC);
 
       if (isNextTileEmpty) {
         // Arrow can escape: free its occupied tiles immediately
         for (const cell of arrow.cells) {
-          occupied.delete(`${cell.r},${cell.c}`);
+          occupied.delete(cell.r * boardCols + cell.c);
         }
         removedAny = true;
       } else {
