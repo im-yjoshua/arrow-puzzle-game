@@ -111,9 +111,29 @@ function growSnake(
     return best;
   }
 
+  // Head/body alignment: the segment touching the head must run opposite the
+  // escape direction, i.e. the body always trails directly behind the chevron.
+  // Without this the chevron renders glued sideways onto a 90° bend (the
+  // "odd-looking" arrows). Seed the snake with that forced first step; if the
+  // cell behind the head isn't free, this head/dir candidate can't produce a
+  // clean arrow, so bow out (length 1 loses the longest-snake contest and the
+  // bounded outer retry loop recovers from the rare all-blocked deadlock).
+  const behind: CellCoord = {
+    r: head.r + (dir === 'down' ? -1 : dir === 'up' ? 1 : 0),
+    c: head.c + (dir === 'right' ? -1 : dir === 'left' ? 1 : 0),
+  };
+  const behindKey = behind.r * cols + behind.c;
+  const behindFree =
+    behind.r >= 0 && behind.r < rows &&
+    behind.c >= 0 && behind.c < cols &&
+    remaining.has(behindKey);
+  if (!behindFree) {
+    return best;
+  }
+
   for (let trial = 0; trial < 3; trial++) {
-    let current: CellCoord[] = [head];
-    const visited = new Set<number>([head.r * cols + head.c]);
+    let current: CellCoord[] = [behind, head];
+    const visited = new Set<number>([head.r * cols + head.c, behindKey]);
 
     while (current.length < maxLen) {
       const tail = current[0];
