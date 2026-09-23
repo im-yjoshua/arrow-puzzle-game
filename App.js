@@ -1000,12 +1000,14 @@ const GameScreen = ({ onBack }) => {
     }
   }, [currency.addCoins, levelUp, settings?.haptics, activeLevel, activeDifficulty, buildLevelMatrix, nextLevelMatrix]);
 
-  const initLevel = () => {
+  const initLevel = (opts) => {
     setIsWon(false);
     setIsGameOver(false);
     setIsLevelComplete(false);
     setIsAdLoading(false);
-    currency.refillHearts(3);
+    // Fresh levels refill to 3 hearts; give-up restarts pass heartRefill: 1.
+    const heartRefill = opts && opts.heartRefill != null ? opts.heartRefill : 3;
+    currency.refillHearts(heartRefill);
     setFloatingTexts([]);
     comboCountRef.current = 0;
     setCombo(0);
@@ -1369,9 +1371,17 @@ const GameScreen = ({ onBack }) => {
     }
   };
 
+  // Giving up is no longer a free heart reset: it costs 25 coins (or whatever
+  // coins are left) and restarts with 1 heart instead of a full refill.
+  const GIVE_UP_RESTART_COST = 25;
+
   const handleDeclineRevive = () => {
     setIsGameOver(false);
-    initLevel();
+    const affordable = Math.min(GIVE_UP_RESTART_COST, currency.coins || 0);
+    if (affordable > 0) {
+      currency.spendCoins(affordable);
+    }
+    initLevel({ heartRefill: 1 });
   };
 
   return (
@@ -1581,7 +1591,7 @@ const GameOverModal = ({ visible, onWatchAd, onSpendDiamonds, onDecline, diamond
             </JuicyButton>
 
             <JuicyButton style={styles.gameOverDeclineButton} onPress={onDecline}>
-              <Text style={styles.gameOverDeclineText}>Give Up & Restart</Text>
+              <Text style={styles.gameOverDeclineText}>Give Up & Restart (25 🪙)</Text>
             </JuicyButton>
           </View>
         </Animated.View>
