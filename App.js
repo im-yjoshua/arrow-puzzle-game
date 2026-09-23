@@ -783,6 +783,8 @@ const GameScreen = ({ onBack }) => {
   const floatingIdRef = React.useRef(0);
   const lastTapTimeRef = React.useRef(0);
   const comboCountRef = React.useRef(0);
+  // Visible combo meter (combo ≥ 2). Synced with comboCountRef wherever it changes.
+  const [combo, setCombo] = useState(0);
 
   const handleFloatingComplete = React.useCallback((id) => {
     setFloatingTexts(prev => prev.filter(item => item.id !== id));
@@ -957,6 +959,7 @@ const GameScreen = ({ onBack }) => {
         setIsGenerating(false);
         setFloatingTexts([]);
         comboCountRef.current = 0;
+        setCombo(0);
         activeSlitheringCountRef.current = 0;
 
         // Instantly fade in the new board smoothly
@@ -983,6 +986,7 @@ const GameScreen = ({ onBack }) => {
     currency.refillHearts(3);
     setFloatingTexts([]);
     comboCountRef.current = 0;
+    setCombo(0);
     boardFadeOpacity.value = 1;
     activeSlitheringCountRef.current = 0;
 
@@ -1153,17 +1157,28 @@ const GameScreen = ({ onBack }) => {
         activeSlitheringCountRef.current += 1;
         arrowRefs.current[clickedArrow.id]?.slither();
 
-        // Check for rapid combo or ~30% random baseline
+        // Rapid taps chain a combo: every combo tap (x2 and up) pays +1 coin and
+        // lights the combo meter. A slow tap restarts the chain at x1.
         const now = Date.now();
         const isRapid = now - lastTapTimeRef.current < 600;
         lastTapTimeRef.current = now;
-        if (isRapid) {
-          comboCountRef.current += 1;
-        } else {
-          comboCountRef.current = 1;
-        }
+        const newCombo = isRapid ? comboCountRef.current + 1 : 1;
+        comboCountRef.current = newCombo;
+        setCombo(newCombo);
 
-        if (Math.random() < 0.3 || comboCountRef.current >= 2) {
+        if (newCombo >= 2) {
+          currency.addCoins(1);
+          const word = `🔥 x${newCombo}  +1 🪙`;
+          const rotation = Math.floor(Math.random() * 11) - 5; // -5deg to 5deg
+          const x = c * dynamicCellSize + dynamicCellSize / 2;
+          const y = r * dynamicCellSize + dynamicCellSize / 2;
+          const newId = ++floatingIdRef.current;
+
+          setFloatingTexts(prev => [
+            ...prev,
+            { id: newId, text: word, x, y, rotation }
+          ]);
+        } else if (Math.random() < 0.3) {
           const word = HYPE_WORDS[Math.floor(Math.random() * HYPE_WORDS.length)];
           const rotation = Math.floor(Math.random() * 11) - 5; // -5deg to 5deg
           const x = c * dynamicCellSize + dynamicCellSize / 2;
@@ -1188,6 +1203,7 @@ const GameScreen = ({ onBack }) => {
 
         AudioController.playInvalidArrow();
         comboCountRef.current = 0;
+        setCombo(0);
         arrowRefs.current[clickedArrow.id]?.wiggle();
       }
     }
@@ -1368,6 +1384,9 @@ const GameScreen = ({ onBack }) => {
         <Text style={[styles.blocksLeftText, { color: theme.textSecondary }]}>
           {isGenerating ? 'Building maze...' : `${blocksLeft} arrows remaining`}
         </Text>
+        {combo >= 2 && (
+          <Text style={styles.comboMeter}>🔥 COMBO x{combo}</Text>
+        )}
       </View>
       
       <View style={styles.boardWrapper} pointerEvents={isGameOver || isGenerating ? 'none' : 'auto'}>
@@ -2237,6 +2256,13 @@ const styles = StyleSheet.create({
     color: '#7A6E65',
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  comboMeter: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: '#E8641B',
   },
   boardWrapper: {
     alignItems: 'center',
