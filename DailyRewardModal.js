@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, Dimensions } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Modal, Dimensions, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import Animated, { 
@@ -16,6 +16,10 @@ import AudioController from './AudioController';
 import JuicyButton from './JuicyButton';
 
 export const DAILY_REWARD_STORAGE_KEY = '@daily_reward_progress';
+
+// Tolerance for small backward jumps (NTP corrections, timezone changes).
+// Larger backward jumps are treated as clock tampering and freeze claims.
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
 
 export const DAILY_REWARDS = [
   { day: 1, label: 'Day 1', rewardType: 'coins', amount: 50, icon: '🪙', title: '+50 Coins' },
@@ -34,14 +38,23 @@ export const checkDailyRewardStatus = async () => {
     const todayDateStr = new Date(now).toDateString();
 
     if (!raw) {
-      return { canClaim: true, streak: 1, lastClaimedDate: null };
+      return { canClaim: true, streak: 1, lastClaimedDate: null, clockTampered: false };
     }
 
     const data = JSON.parse(raw);
     const { lastClaimedDate, lastClaimedTimestamp, streak } = data;
 
+    // Backward clock: device time is earlier than the last recorded claim.
+    // Freeze rewards until the clock catches up — prevents re-claiming the
+    // same day by rewinding the device clock. (Forward jumps that land on a
+    // "new day" are indistinguishable from real next-day logins without
+    // server time; the streak still only advances one day per claim.)
+    if (lastClaimedTimestamp && now < lastClaimedTimestamp - CLOCK_SKEW_TOLERANCE_MS) {
+      return { canClaim: false, streak: streak || 1, lastClaimedDate, clockTampered: true };
+    }
+
     if (lastClaimedDate === todayDateStr) {
-      return { canClaim: false, streak: streak || 1, lastClaimedDate };
+      return { canClaim: false, streak: streak || 1, lastClaimedDate, clockTampered: false };
     }
 
     // Check if player missed more than 48 hours
@@ -56,10 +69,10 @@ export const checkDailyRewardStatus = async () => {
       nextStreak = (streak % 7) + 1;
     }
 
-    return { canClaim: true, streak: nextStreak, lastClaimedDate };
+    return { canClaim: true, streak: nextStreak, lastClaimedDate, clockTampered: false };
   } catch (e) {
     console.warn('Error reading daily reward status:', e);
-    return { canClaim: true, streak: 1, lastClaimedDate: null };
+    return { canClaim: true, streak: 1, lastClaimedDate: null, clockTampered: false };
   }
 };
 
@@ -69,6 +82,10 @@ export const DailyRewardModal = ({ visible, onClose }) => {
   const [claimedToday, setClaimedToday] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [clockTampered, setClockTampered] = useState(false);
+  // Ref guard: state updates are async, so a rapid double-tap could otherwise
+  // slip past the isClaiming check and grant twice.
+  const claimingRef = useRef(false);
 
   const { addCoins: addCoinsCurrency, addDiamonds: addDiamondsCurrency, addHearts: addHeartsCurrency } = useCurrency();
   const { settings } = useStore();
@@ -80,6 +97,7 @@ export const DailyRewardModal = ({ visible, onClose }) => {
     setCurrentStreak(status.streak);
     setCanClaim(status.canClaim);
     setClaimedToday(!status.canClaim);
+    setClockTampered(!!status.clockTampered);
     setLoading(false);
   };
 
@@ -90,52 +108,61 @@ export const DailyRewardModal = ({ visible, onClose }) => {
   }, [visible]);
 
   const handleClaim = async () => {
-    if (!canClaim || claimedToday || isClaiming) return;
+    if (!canClaim || claimedToday || isClaiming || claimingRef.current) return;
+    claimingRef.current = true;
     setIsClaiming(true);
 
-    // Button celebration bounce
-    claimButtonScale.value = withSequence(
-      withTiming(0.88, { duration: 100 }),
-      withSpring(1.05, { damping: 10, stiffness: 200 }),
-      withTiming(1, { duration: 150 })
-    );
+    try {
+      // Button celebration bounce
+      claimButtonScale.value = withSequence(
+        withTiming(0.88, { duration: 100 }),
+        withSpring(1.05, { damping: 10, stiffness: 200 }),
+        withTiming(1, { duration: 150 })
+      );
 
-    const reward = DAILY_REWARDS[currentStreak - 1];
-    if (reward) {
-      // Single ledger: CurrencyContext only. (The old zustand store mirror
-      // was a shadow balance the UI never displayed.)
-      if (reward.rewardType === 'coins') {
-        addCoinsCurrency(reward.amount);
-      } else if (reward.rewardType === 'diamonds') {
-        addDiamondsCurrency(reward.amount);
-      } else if (reward.rewardType === 'lives' || reward.rewardType === 'hearts') {
-        addHeartsCurrency(reward.amount);
-      } else if (reward.rewardType === 'jackpot') {
-        addDiamondsCurrency(reward.amount);
-        if (reward.bonusCoins) {
-          addCoinsCurrency(reward.bonusCoins);
+      const reward = DAILY_REWARDS[currentStreak - 1];
+      if (reward) {
+        // Single ledger: CurrencyContext only. (The old zustand store mirror
+        // was a shadow balance the UI never displayed.)
+        if (reward.rewardType === 'coins') {
+          addCoinsCurrency(reward.amount);
+        } else if (reward.rewardType === 'diamonds') {
+          addDiamondsCurrency(reward.amount);
+        } else if (reward.rewardType === 'lives' || reward.rewardType === 'hearts') {
+          addHeartsCurrency(reward.amount);
+        } else if (reward.rewardType === 'jackpot') {
+          addDiamondsCurrency(reward.amount);
+          if (reward.bonusCoins) {
+            addCoinsCurrency(reward.bonusCoins);
+          }
         }
       }
+
+      // Audio and haptics
+      AudioController.playLevelComplete();
+      if (settings.haptics) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      // Save to AsyncStorage — only mark claimed after the save succeeds, so a
+      // storage failure leaves the reward claimable instead of stuck.
+      const now = Date.now();
+      const todayDateStr = new Date(now).toDateString();
+      await AsyncStorage.setItem(DAILY_REWARD_STORAGE_KEY, JSON.stringify({
+        lastClaimedDate: todayDateStr,
+        lastClaimedTimestamp: now,
+        streak: currentStreak,
+      }));
+
+      setCanClaim(false);
+      setClaimedToday(true);
+    } catch (e) {
+      console.warn('Daily reward claim failed:', e);
+      Alert.alert('Claim failed', 'Could not save your reward. Please try again.');
+    } finally {
+      claimingRef.current = false;
+      setIsClaiming(false);
     }
-
-    // Audio and haptics
-    AudioController.playLevelComplete();
-    if (settings.haptics) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-
-    // Save to AsyncStorage
-    const now = Date.now();
-    const todayDateStr = new Date(now).toDateString();
-    await AsyncStorage.setItem(DAILY_REWARD_STORAGE_KEY, JSON.stringify({
-      lastClaimedDate: todayDateStr,
-      lastClaimedTimestamp: now,
-      streak: currentStreak,
-    }));
-
-    setCanClaim(false);
-    setClaimedToday(true);
-    setIsClaiming(false);
   };
 
   const animatedButtonStyle = useAnimatedStyle(() => ({
@@ -175,7 +202,13 @@ export const DailyRewardModal = ({ visible, onClose }) => {
 
           {/* Action Footer */}
           <Animated.View style={[styles.footer, animatedButtonStyle]}>
-            {canClaim && !claimedToday ? (
+            {clockTampered ? (
+              <View style={styles.tamperNotice}>
+                <Text style={styles.tamperNoticeText}>
+                  ⚠️ Your device clock looks incorrect. Daily rewards are paused until your clock is set correctly.
+                </Text>
+              </View>
+            ) : canClaim && !claimedToday ? (
               <JuicyButton 
                 style={[styles.claimButton, isClaiming && styles.claimButtonDisabled]} 
                 onPress={handleClaim}
@@ -453,6 +486,21 @@ const styles = StyleSheet.create({
     color: '#7A6E65',
     fontSize: 13,
     fontWeight: '800',
+  },
+  tamperNotice: {
+    backgroundColor: '#FDECEA',
+    borderColor: '#E74C3C',
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  tamperNoticeText: {
+    color: '#A93226',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });
 
