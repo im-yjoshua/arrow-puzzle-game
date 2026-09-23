@@ -1,7 +1,7 @@
 import { Platform, View, Text, StyleSheet } from 'react-native';
 
-// Google AdMob Test IDs
-const bannerAdId = Platform.OS === 'ios' ? 'ca-app-pub-3940256099942544~1458002511' : 'ca-app-pub-3940256099942544~3347511713';
+// Google AdMob Test IDs (swap for real ad unit IDs before production launch)
+const bannerAdId = Platform.OS === 'ios' ? 'ca-app-pub-3940256099942544/2934735716' : 'ca-app-pub-3940256099942544/6300978111';
 const interstitialAdId = Platform.OS === 'ios' ? 'ca-app-pub-3940256099942544/4411468910' : 'ca-app-pub-3940256099942544/1033173712';
 const rewardedAdId = Platform.OS === 'ios' ? 'ca-app-pub-3940256099942544/1712485313' : 'ca-app-pub-3940256099942544/5224354917';
 

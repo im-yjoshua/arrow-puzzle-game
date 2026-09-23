@@ -6,17 +6,28 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F3EBE1"
+    },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.imyjoshua.tanglemaze",
+      "buildNumber": "1",
       "infoPlist": {
         "CFBundleIcons": {
           "CFBundleAlternateIcons": {
             "icon-dark": {
-              "CFBundleIconFiles": ["icon-dark"],
+              "CFBundleIconFiles": [
+                "icon-dark"
+              ],
               "UIPrerenderedIcon": true
             },
             "icon-gold": {
-              "CFBundleIconFiles": ["icon-gold"],
+              "CFBundleIconFiles": [
+                "icon-gold"
+              ],
               "UIPrerenderedIcon": true
             }
           }
@@ -24,6 +35,8 @@
       }
     },
     "android": {
+      "package": "com.imyjoshua.tanglemaze",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -63,11 +76,5 @@
         }
       ]
     ]
-  },
-  "react-native-google-mobile-ads": {
-    "androidAppId": "ca-app-pub-3940256099942544~3347511713",
-    "iosAppId": "ca-app-pub-3940256099942544~1458002511",
-    "android_app_id": "ca-app-pub-3940256099942544~3347511713",
-    "ios_app_id": "ca-app-pub-3940256099942544~1458002511"
   }
 }
