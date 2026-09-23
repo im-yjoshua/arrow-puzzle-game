@@ -1,98 +1,59 @@
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useStore } from './store';
 
-let isAudioAvailable: boolean | null = null;
-let AudioModule: any = null;
-
 /**
- * Safely resolves expo-av Audio module without triggering native module missing errors.
- * In Expo Go (SDK 53+ / 57), ExponentAV native module is removed.
- * Calling require('expo-av') directly causes ExponentAV.js to execute requireNativeModule('ExponentAV'),
- * which triggers native C++ error logging (NativeJSLogger.onNewError -> console.error).
- * By probing with requireOptionalNativeModule first, we ensure require('expo-av') is NEVER
- * evaluated unless the native ExponentAV module is actually compiled into the host runtime.
+ * Audio singleton built on expo-audio (Expo SDK 57).
+ *
+ * expo-audio is included in Expo Go and ships the ExponentAudio native
+ * module, so unlike the old expo-av probing hack there is nothing to probe
+ * for: player creation is simply wrapped in try/catch so a missing native
+ * module degrades to silent no-ops instead of crashing the game.
+ *
+ * Public API is unchanged from the expo-av version, so no callers change.
  */
-function getAudio(): any | null {
-  if (isAudioAvailable === false) return null;
-  if (AudioModule) return AudioModule;
-
-  try {
-    // 1. First probe if the ExponentAV native module exists without throwing or logging
-    const nativeAV =
-      (typeof globalThis !== 'undefined' && (globalThis as any)?.expo?.modules?.['ExponentAV']) ||
-      requireOptionalNativeModule('ExponentAV');
-
-    if (!nativeAV) {
-      isAudioAvailable = false;
-      return null;
-    }
-
-    // 2. Only require expo-av if the native module actually exists in this binary
-    const av = require('expo-av');
-    if (av && av.Audio) {
-      AudioModule = av.Audio;
-      isAudioAvailable = true;
-      return AudioModule;
-    }
-  } catch (_) {
-    isAudioAvailable = false;
-  }
-
-  isAudioAvailable = false;
-  return null;
-}
-
 class AudioController {
-  private bgmSound: any | null = null;
-  private sfxPopSound: any | null = null;
-  private sfxThudSound: any | null = null;
-  private sfxChimeSound: any | null = null;
+  private bgmPlayer: AudioPlayer | null = null;
+  private sfxPopPlayer: AudioPlayer | null = null;
+  private sfxThudPlayer: AudioPlayer | null = null;
+  private sfxChimePlayer: AudioPlayer | null = null;
 
   private isBgmLoading: boolean = false;
-  private isBgmPlaying: boolean = false;
   private isAudioModeConfigured: boolean = false;
 
   private async configureAudioMode(): Promise<void> {
     if (this.isAudioModeConfigured) return;
-    const Audio = getAudio();
-    if (!Audio) return;
     try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-      });
+      // playsInSilentMode: BGM/SFX still play with the iOS silent switch on.
+      // Interruption defaults to 'mixWithOthers', which suits short SFX.
+      await setAudioModeAsync({ playsInSilentMode: true });
       this.isAudioModeConfigured = true;
     } catch (e) {
       console.warn('AudioController: Could not configure audio mode', e);
     }
   }
 
+  private createPlayer(asset: any, volume: number, loop: boolean = false): AudioPlayer | null {
+    try {
+      const player = createAudioPlayer(asset);
+      player.volume = volume;
+      player.loop = loop;
+      return player;
+    } catch (e) {
+      console.warn('AudioController: Could not create audio player', e);
+      return null;
+    }
+  }
+
   /**
    * Initializes and loads the background music asynchronously.
-   * Loads local audio asset and configures it to loop.
    */
   public async initBgm(): Promise<void> {
-    if (this.bgmSound || this.isBgmLoading) return;
-    const Audio = getAudio();
-    if (!Audio) return;
+    if (this.bgmPlayer || this.isBgmLoading) return;
     this.isBgmLoading = true;
 
     try {
       await this.configureAudioMode();
-
-      // Load local BGM audio asset asynchronously
-      const bgmAsset = require('./assets/audio/bgm.mp3');
-      const { sound } = await Audio.Sound.createAsync(
-        bgmAsset,
-        {
-          isLooping: true,
-          volume: 0.35,
-          shouldPlay: false,
-        }
-      );
-
-      this.bgmSound = sound;
+      this.bgmPlayer = this.createPlayer(require('./assets/audio/bgm.mp3'), 0.35, true);
       this.isBgmLoading = false;
 
       // Check current store setting for BGM
@@ -107,16 +68,14 @@ class AudioController {
   }
 
   public async playBgm(): Promise<void> {
-    if (!this.bgmSound) {
+    if (!this.bgmPlayer) {
       await this.initBgm();
       return;
     }
 
     try {
-      const status = await this.bgmSound.getStatusAsync();
-      if (status.isLoaded && !status.isPlaying) {
-        await this.bgmSound.playAsync();
-        this.isBgmPlaying = true;
+      if (!this.bgmPlayer.playing) {
+        this.bgmPlayer.play();
       }
     } catch (e) {
       console.warn('AudioController: Failed to play BGM:', e);
@@ -124,12 +83,10 @@ class AudioController {
   }
 
   public async pauseBgm(): Promise<void> {
-    if (!this.bgmSound) return;
+    if (!this.bgmPlayer) return;
     try {
-      const status = await this.bgmSound.getStatusAsync();
-      if (status.isLoaded && status.isPlaying) {
-        await this.bgmSound.pauseAsync();
-        this.isBgmPlaying = false;
+      if (this.bgmPlayer.playing) {
+        this.bgmPlayer.pause();
       }
     } catch (e) {
       console.warn('AudioController: Failed to pause BGM:', e);
@@ -148,21 +105,17 @@ class AudioController {
    * Preloads short sound effects asynchronously so they play instantly on tap with zero latency.
    */
   public async preloadSfx(): Promise<void> {
-    const Audio = getAudio();
-    if (!Audio) return;
-
     try {
       await this.configureAudioMode();
-
-      const [popResult, thudResult, chimeResult] = await Promise.all([
-        Audio.Sound.createAsync(require('./assets/audio/sfx_pop.wav'), { volume: 0.6 }),
-        Audio.Sound.createAsync(require('./assets/audio/sfx_thud.wav'), { volume: 0.55 }),
-        Audio.Sound.createAsync(require('./assets/audio/sfx_chime.wav'), { volume: 0.7 }),
-      ]);
-
-      this.sfxPopSound = popResult.sound;
-      this.sfxThudSound = thudResult.sound;
-      this.sfxChimeSound = chimeResult.sound;
+      if (!this.sfxPopPlayer) {
+        this.sfxPopPlayer = this.createPlayer(require('./assets/audio/sfx_pop.wav'), 0.6);
+      }
+      if (!this.sfxThudPlayer) {
+        this.sfxThudPlayer = this.createPlayer(require('./assets/audio/sfx_thud.wav'), 0.55);
+      }
+      if (!this.sfxChimePlayer) {
+        this.sfxChimePlayer = this.createPlayer(require('./assets/audio/sfx_chime.wav'), 0.7);
+      }
     } catch (error) {
       console.warn('AudioController: Failed to preload SFX:', error);
     }
@@ -175,7 +128,7 @@ class AudioController {
     const sfxEnabled = useStore.getState().settings.sfx;
     if (!sfxEnabled) return;
 
-    this.playSound(this.sfxPopSound, require('./assets/audio/sfx_pop.wav'), 0.6);
+    this.sfxPopPlayer = this.playReplayable(this.sfxPopPlayer, require('./assets/audio/sfx_pop.wav'), 0.6);
   }
 
   /**
@@ -185,7 +138,7 @@ class AudioController {
     const sfxEnabled = useStore.getState().settings.sfx;
     if (!sfxEnabled) return;
 
-    this.playSound(this.sfxThudSound, require('./assets/audio/sfx_thud.wav'), 0.55);
+    this.sfxThudPlayer = this.playReplayable(this.sfxThudPlayer, require('./assets/audio/sfx_thud.wav'), 0.55);
   }
 
   /**
@@ -195,51 +148,37 @@ class AudioController {
     const sfxEnabled = useStore.getState().settings.sfx;
     if (!sfxEnabled) return;
 
-    this.playSound(this.sfxChimeSound, require('./assets/audio/sfx_chime.wav'), 0.7);
+    this.sfxChimePlayer = this.playReplayable(this.sfxChimePlayer, require('./assets/audio/sfx_chime.wav'), 0.7);
   }
 
-  private async playSound(cachedSound: any | null, asset: any, volume: number): Promise<void> {
-    const Audio = getAudio();
-    if (!Audio) return;
-
+  /**
+   * Replays a cached SFX player from the start. Lazily creates (and caches)
+   * the player on first use so SFX still work even if preloadSfx() never ran.
+   */
+  private playReplayable(player: AudioPlayer | null, asset: any, volume: number): AudioPlayer | null {
     try {
-      if (cachedSound) {
-        const status = await cachedSound.getStatusAsync();
-        if (status.isLoaded) {
-          await cachedSound.replayAsync();
-          return;
-        }
+      if (!player) {
+        player = this.createPlayer(asset, volume);
       }
-
-      // Fallback: create & play asynchronously if not yet preloaded
-      const { sound } = await Audio.Sound.createAsync(asset, { volume, shouldPlay: true });
-      sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-        }
-      });
+      if (player) {
+        player.seekTo(0);
+        player.play();
+      }
+      return player;
     } catch (e) {
       console.warn('AudioController: SFX playback error:', e);
+      return player;
     }
   }
 
   public async cleanup(): Promise<void> {
     try {
-      if (this.bgmSound) {
-        await this.bgmSound.unloadAsync();
-        this.bgmSound = null;
-      }
-      if (this.sfxPopSound) {
-        await this.sfxPopSound.unloadAsync();
-        this.sfxPopSound = null;
-      }
-      if (this.sfxThudSound) {
-        await this.sfxThudSound.unloadAsync();
-        this.sfxThudSound = null;
-      }
-      if (this.sfxChimeSound) {
-        await this.sfxChimeSound.unloadAsync();
-        this.sfxChimeSound = null;
+      for (const key of ['bgmPlayer', 'sfxPopPlayer', 'sfxThudPlayer', 'sfxChimePlayer'] as const) {
+        const player = this[key];
+        if (player) {
+          player.remove();
+          this[key] = null;
+        }
       }
     } catch (e) {
       console.warn('AudioController: Cleanup error:', e);

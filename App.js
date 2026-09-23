@@ -450,10 +450,6 @@ const SettingsModal = ({ visible, onClose }) => {
   const currency = useCurrency();
   const [isRestoring, setIsRestoring] = useState(false);
 
-  const handleAuth = (provider) => {
-    console.log(`Auth triggered for: ${provider}`);
-  };
-
   const handleRestorePurchases = async () => {
     setIsRestoring(true);
     try {
@@ -543,7 +539,7 @@ const SettingsModal = ({ visible, onClose }) => {
           </View>
 
           <View style={styles.authSection}>
-            <Text style={[styles.authTitle, { color: theme.textSecondary }]}>Purchases & Account</Text>
+            <Text style={[styles.authTitle, { color: theme.textSecondary }]}>Purchases</Text>
             <JuicyButton
               style={[styles.restoreButton, { backgroundColor: theme.pillBg, borderColor: theme.border }]}
               onPress={handleRestorePurchases}
@@ -554,13 +550,6 @@ const SettingsModal = ({ visible, onClose }) => {
               ) : (
                 <Text style={[styles.restoreButtonText, { color: theme.text }]}>🔄 Restore Purchases</Text>
               )}
-            </JuicyButton>
-
-            <JuicyButton style={[styles.authButton, styles.appleAuth]} onPress={() => handleAuth('Apple')}>
-              <Text style={styles.appleAuthText}> Sign in with Apple</Text>
-            </JuicyButton>
-            <JuicyButton style={[styles.authButton, styles.googleAuth]} onPress={() => handleAuth('Google')}>
-              <Text style={styles.googleAuthText}>G Sign in with Google</Text>
             </JuicyButton>
           </View>
         </View>
@@ -2282,30 +2271,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#7A6E65',
     marginBottom: 12,
-  },
-  authButton: {
-    paddingVertical: 13,
-    borderRadius: 14,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  appleAuth: {
-    backgroundColor: '#000',
-  },
-  appleAuthText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  googleAuth: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#DDD',
-  },
-  googleAuthText: {
-    color: '#261E1A',
-    fontSize: 15,
-    fontWeight: 'bold',
   },
   safeArea: {
     flex: 1,

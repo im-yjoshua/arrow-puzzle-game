@@ -5,7 +5,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.22",
-    "expo-av": "^16.0.8",
+    "expo-audio": "~57.0.5",
     "expo-dynamic-app-icon": "^1.2.0",
     "expo-haptics": "~57.0.3",
     "expo-notifications": "~57.0.20",
@@ -24,8 +24,7 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "ios": "expo start --ios"
   },
   "private": true,
   "devDependencies": {
