@@ -1793,34 +1793,38 @@ const RewardModal = ({ visible, onNextLevel, stars = 0 }) => {
   if (!visible) return null;
 
   return (
-    <Animated.View style={styles.rewardOverlay} entering={FadeIn}>
-      <Text style={styles.winText}>Maze Solved!</Text>
-      {stars > 0 && (
-        <Text style={styles.starRow}>
-          {'★'.repeat(stars)}{'☆'.repeat(Math.max(0, 3 - stars))}
-        </Text>
-      )}
-            {!opened ? (
-        <JuicyButton style={styles.chestToOpen} onPress={handleOpen}>
-          <Text style={styles.chestEmoji}>🎁</Text>
-          <Text style={styles.chestHint}>Tap to Open</Text>
-        </JuicyButton>
-      ) : (
-        <Animated.View style={styles.rewardContent} entering={ZoomIn}>
-          <Text style={styles.rewardCoins}>+50 🪙</Text>
-          {droppedItem && (
-            <View style={styles.rareDropBox}>
-              <Text style={styles.rareDropLabel}>Rare Drop!</Text>
-              <Image source={droppedItem.image} style={styles.droppedImage} />
-              <Text style={styles.rareDropName}>{droppedItem.name}</Text>
+    <Modal visible={visible} transparent={true} animationType="fade">
+      <View style={styles.rewardBackdrop}>
+        <Animated.View style={styles.rewardCard} entering={ZoomIn}>
+          <Text style={styles.winText}>Maze Solved!</Text>
+          {stars > 0 && (
+            <Text style={styles.starRow}>
+              {'★'.repeat(stars)}{'☆'.repeat(Math.max(0, 3 - stars))}
+            </Text>
+          )}
+          {!opened ? (
+            <JuicyButton style={styles.chestToOpen} onPress={handleOpen}>
+              <Text style={styles.chestEmoji}>🎁</Text>
+              <Text style={styles.chestHint}>Tap to Open</Text>
+            </JuicyButton>
+          ) : (
+            <View style={styles.rewardContent}>
+              <Text style={styles.rewardCoins}>+50 🪙</Text>
+              {droppedItem && (
+                <View style={styles.rareDropBox}>
+                  <Text style={styles.rareDropLabel}>Rare Drop!</Text>
+                  <Image source={droppedItem.image} style={styles.droppedImage} />
+                  <Text style={styles.rareDropName}>{droppedItem.name}</Text>
+                </View>
+              )}
+              <JuicyButton style={[styles.retryButton, { marginTop: 24 }]} onPress={onNextLevel}>
+                <Text style={styles.retryText}>Next Level</Text>
+              </JuicyButton>
             </View>
           )}
-          <JuicyButton style={[styles.retryButton, { marginTop: 30 }]} onPress={onNextLevel}>
-            <Text style={styles.retryText}>Next Level</Text>
-          </JuicyButton>
         </Animated.View>
-      )}
-    </Animated.View>
+      </View>
+    </Modal>
   );
 };
 
@@ -2549,19 +2553,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  rewardOverlay: {
-    position: 'absolute',
-    top: 60,
-    alignSelf: 'center',
+  // Win-chest modal: full-screen dimmed backdrop with a centered card, so it
+  // never floats at a magic offset or clips on short screens.
+  rewardBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(20, 15, 12, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  rewardCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '84%',
     backgroundColor: '#FFF',
-    padding: 30,
+    padding: 28,
     borderRadius: 24,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 16,
-    zIndex: 200,
     borderWidth: 1,
     borderColor: '#E8E2D9',
   },
@@ -2858,11 +2870,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 8,
   },
+  // Flexible cells: each takes 1/5 of the row so the 5-column grid fits every
+  // screen width (fixed 56pt cells overflowed the card on 375pt screens).
   levelCell: {
-    width: 56,
-    height: 56,
+    flex: 1,
+    aspectRatio: 1,
     borderRadius: 12,
-    margin: 5,
+    margin: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
