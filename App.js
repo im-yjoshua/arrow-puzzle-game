@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, Dimensions, LogBox, ScrollView, Modal, ActivityIndicator, Switch, Image, ImageBackground, Alert, FlatList } from 'react-native';
-import { SafeAreaView as SafeAreaViewContext, SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaView as SafeAreaViewContext, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -40,7 +40,7 @@ const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 LogBox.ignoreLogs(['[Reanimated] Initial values for animation are missing']);
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const DEFAULT_COLS = 7;
 const DEFAULT_ROWS = 10;
 const CELL_SIZE = Math.floor((width - 24) / DEFAULT_COLS);
@@ -900,9 +900,20 @@ const GameScreen = ({ onBack }) => {
   const currentDiffConfig = DIFFICULTY_CONFIGS[activeDifficulty] || DIFFICULTY_CONFIGS.medium;
   const currentGridRows = grid ? grid.length : currentDiffConfig.rows;
   const currentGridCols = grid && grid[0] ? grid[0].length : currentDiffConfig.cols;
+  const insets = useSafeAreaInsets();
   const boardPadding = 24;
   const availableWidth = width - boardPadding;
-  const dynamicCellSize = Math.floor(availableWidth / currentGridCols);
+  // The board is the flexible element in the vertical stack: constrain cells by
+  // height as well as width so board + chrome + safe-area insets always fit the
+  // screen. Without this the ad banner gets pushed off the bottom on shorter
+  // screens (and the in-flow hint row added vertical pressure). Chrome budget,
+  // measured from styles: navbar 56 + header ~96 + bottom action row ~72 +
+  // ad banner ~90 (adaptive banners vary).
+  const verticalChrome = 314;
+  const availableHeight = height - insets.top - insets.bottom - verticalChrome;
+  const cellByWidth = Math.floor(availableWidth / currentGridCols);
+  const cellByHeight = Math.floor(availableHeight / currentGridRows);
+  const dynamicCellSize = Math.max(20, Math.min(cellByWidth, cellByHeight));
   const currentBoardWidth = dynamicCellSize * currentGridCols;
   const currentBoardHeight = dynamicCellSize * currentGridRows;
 
