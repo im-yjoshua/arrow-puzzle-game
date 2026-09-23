@@ -1581,27 +1581,31 @@ const GameScreen = ({ onBack }) => {
 
       <ShopModal visible={shopVisible} onClose={() => setShopVisible(false)} />
       
-      {/* Floating Hint JuicyButton (lightbulb icon) */}
-      <JuicyButton 
-        style={[
-          styles.floatingHintButton,
-          (isAdLoading || isGameOver || isGenerating || blocksLeft === 0) && styles.floatingHintButtonDisabled
-        ]}
-        onPress={handleHintPress}
-        disabled={isAdLoading || isGameOver || isGenerating || blocksLeft === 0}
-      >
-        {isAdLoading ? (
-          <>
-            <ActivityIndicator size="small" color="#FFFFFF" />
-            <Text style={styles.hintText}>Loading...</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.hintIcon}>💡</Text>
-            <Text style={styles.hintText}>{currency.hints > 0 ? `Hint (${currency.hints})` : 'Hint'}</Text>
-          </>
-        )}
-      </JuicyButton>
+      {/* Bottom action row: the hint button lives in normal flow directly above
+          the ad banner (pinned with marginTop: 'auto'), so the two can never
+          overlap on any screen size — no magic absolute offsets. */}
+      <View style={styles.bottomBar}>
+        <JuicyButton
+          style={[
+            styles.hintButton,
+            (isAdLoading || isGameOver || isGenerating || blocksLeft === 0) && styles.hintButtonDisabled
+          ]}
+          onPress={handleHintPress}
+          disabled={isAdLoading || isGameOver || isGenerating || blocksLeft === 0}
+        >
+          {isAdLoading ? (
+            <>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <Text style={styles.hintText}>Loading...</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.hintIcon}>💡</Text>
+              <Text style={styles.hintText}>{currency.hints > 0 ? `Hint (${currency.hints})` : 'Hint'}</Text>
+            </>
+          )}
+        </JuicyButton>
+      </View>
 
       <View style={styles.adBannerContainer}>
         <AdService.BannerAd />
@@ -2737,8 +2741,9 @@ const styles = StyleSheet.create({
   adBannerContainer: {
     width: '100%',
     alignItems: 'center',
-    marginTop: 'auto',
-    marginBottom: 8,
+    // Bottom safe-area inset comes from the SafeAreaView; this is extra
+    // breathing room above the home indicator.
+    marginBottom: 10,
   },
   tutorialOverlay: {
     position: 'absolute',
@@ -2906,10 +2911,18 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
     letterSpacing: 0.5,
   },
-  floatingHintButton: {
-    position: 'absolute',
-    bottom: 65,
-    right: 20,
+  // Bottom action row pinned above the ad banner. marginTop: 'auto' absorbs all
+  // leftover vertical space so the hint button and banner stack cleanly at the
+  // bottom on every screen height, with breathing room between them.
+  bottomBar: {
+    marginTop: 'auto',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  hintButton: {
     backgroundColor: '#F5A623',
     flexDirection: 'row',
     alignItems: 'center',
@@ -2922,12 +2935,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 8,
-    zIndex: 60,
     gap: 6,
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
-  floatingHintButtonDisabled: {
+  hintButtonDisabled: {
     opacity: 0.6,
   },
   hintIcon: {
