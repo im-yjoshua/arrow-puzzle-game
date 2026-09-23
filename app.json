@@ -7,7 +7,21 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "CFBundleIcons": {
+          "CFBundleAlternateIcons": {
+            "icon-dark": {
+              "CFBundleIconFiles": ["icon-dark"],
+              "UIPrerenderedIcon": true
+            },
+            "icon-gold": {
+              "CFBundleIconFiles": ["icon-gold"],
+              "UIPrerenderedIcon": true
+            }
+          }
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,6 +33,41 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#4A3B32"
+        }
+      ],
+      [
+        "expo-dynamic-app-icon",
+        {
+          "icon-dark": {
+            "image": "./assets/icon-dark.png",
+            "prerendered": true
+          },
+          "icon-gold": {
+            "image": "./assets/icon-gold.png",
+            "prerendered": true
+          }
+        }
+      ]
+    ]
+  },
+  "react-native-google-mobile-ads": {
+    "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+    "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+    "android_app_id": "ca-app-pub-3940256099942544~3347511713",
+    "ios_app_id": "ca-app-pub-3940256099942544~1458002511"
   }
 }
