@@ -1473,9 +1473,14 @@ const GameScreen = ({ onBack }) => {
         <Text style={[styles.blocksLeftText, { color: theme.textSecondary }]}>
           {isGenerating ? 'Building maze...' : `${blocksLeft} arrows remaining`}
         </Text>
-        {combo >= 2 && (
-          <Text style={styles.comboMeter}>🔥 COMBO x{combo}</Text>
-        )}
+        {/* Fixed-height slot: the combo meter mounts/unmounts as combos chain
+            and break, and without reserved space every appearance pushed the
+            whole board down (the "screen wiggle" on arrow pulls). */}
+        <View style={styles.comboSlot}>
+          {combo >= 2 && (
+            <Text style={styles.comboMeter}>🔥 COMBO x{combo}</Text>
+          )}
+        </View>
       </View>
       
       <View style={styles.boardWrapper} pointerEvents={isGameOver || isGenerating ? 'none' : 'auto'}>
@@ -2375,11 +2380,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   comboMeter: {
-    marginTop: 4,
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 1,
     color: '#E8641B',
+  },
+  comboSlot: {
+    height: 24,
+    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   boardWrapper: {
     alignItems: 'center',
