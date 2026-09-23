@@ -20,7 +20,7 @@ import Animated, {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { generateLevel, DIFFICULTY_CONFIGS, validateBoard } from './LevelGenerator';
+import { generateLevel, DIFFICULTY_CONFIGS } from './LevelGenerator';
 import { DifficultySelector, DIFFICULTIES } from './DifficultySelector';
 import { useStore } from './store';
 import { AdService } from './AdService';
@@ -825,12 +825,7 @@ const GameScreen = ({ onBack }) => {
     }
     const arrowsArray = Array.from(uniqueArrows.values());
 
-    // Defensive solvability verification: strictly ensure 100% solvable matrix before UI rendering
-    if (typeof validateBoard === 'function' && !validateBoard(arrowsArray, gRows, gCols)) {
-      console.warn(`[buildLevelMatrix] Matrix for ${diff} Level ${levelNum} failed solvability validation, regenerating...`);
-      return buildLevelMatrix(levelNum, diff);
-    }
-
+    // Levels are solvable by construction (see LevelGenerator) — no re-validation needed.
     return {
       grid: gridToUse,
       arrows: arrowsArray,

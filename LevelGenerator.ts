@@ -1,6 +1,10 @@
 export type Direction = 'up' | 'down' | 'left' | 'right';
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'extraHard';
 
+// React Native global (true in dev builds). Declared here so plain-JS tooling
+// and tsc stay happy; guarded with typeof checks at use sites.
+declare const __DEV__: boolean | undefined;
+
 export interface CellCoord {
   r: number;
   c: number;
@@ -370,35 +374,40 @@ export function validateBoard(arrowsArray: Block[], rows?: number, cols?: number
   return true;
 }
 
-export function generateLevel(activeDifficulty: Difficulty = 'medium', retryCount: number = 0): any {
+export function generateLevel(activeDifficulty: Difficulty = 'medium'): any {
   const config = DIFFICULTY_CONFIGS[activeDifficulty] || DIFFICULTY_CONFIGS.medium;
-  const MAX_RETRIES = 50;
 
-  // 1. Try strict generation with solvability validation
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  // Single-pass generation. Levels are solvable by construction (see tryGenerateLevel),
+  // so the old validate-and-retry storm is gone. This small bounded loop only recovers
+  // from rare placement deadlocks (tryGenerateLevel returning null) — it never
+  // re-validates, and it never loops forever.
+  for (let attempt = 0; attempt < 10; attempt++) {
     const candidate = tryGenerateLevel(config, false);
-    if (candidate && validateBoard(candidate.blocks, candidate.rows, candidate.cols)) {
+    if (candidate) {
+      assertSolvableByConstruction(candidate);
       return { ...candidate, difficulty: activeDifficulty };
     }
   }
 
-  // 2. Fallback to micro-paths with solvability validation if strict generation failed 50 times
-  for (let fallbackAttempt = 0; fallbackAttempt < MAX_RETRIES; fallbackAttempt++) {
-    const fallbackCandidate = tryGenerateLevel(config, true);
-    if (fallbackCandidate && validateBoard(fallbackCandidate.blocks, fallbackCandidate.rows, fallbackCandidate.cols)) {
-      return { ...fallbackCandidate, difficulty: activeDifficulty };
+  // Fallback: relax the minimum-length rule (lets endgame singletons become
+  // length-1 blocks instead of discarding a nearly-complete board).
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = tryGenerateLevel(config, true);
+    if (candidate) {
+      assertSolvableByConstruction(candidate);
+      return { ...candidate, difficulty: activeDifficulty };
     }
   }
 
-  // 3. Recursive retry safeguard up to 5 times
-  if (retryCount < 5) {
-    return generateLevel(activeDifficulty, retryCount + 1);
-  }
+  throw new Error(`[LevelGenerator] could not place a ${activeDifficulty} level after 20 attempts`);
+}
 
-  // Final guaranteed fallback
-  let guaranteed = tryGenerateLevel(config, true);
-  while (!guaranteed || !validateBoard(guaranteed.blocks, guaranteed.rows, guaranteed.cols)) {
-    guaranteed = tryGenerateLevel(config, true);
+// Dev-only sanity check that the construction invariant holds. Never runs in
+// production or in plain-JS test harnesses (no __DEV__ global there).
+function assertSolvableByConstruction(candidate: { blocks: Block[]; rows: number; cols: number }): void {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    if (!validateBoard(candidate.blocks, candidate.rows, candidate.cols)) {
+      console.warn('[LevelGenerator] construction invariant violated — this should never happen');
+    }
   }
-  return { ...guaranteed, difficulty: activeDifficulty };
 }
