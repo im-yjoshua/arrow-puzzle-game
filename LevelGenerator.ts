@@ -370,8 +370,25 @@ export function validateBoard(arrowsArray: Block[], rows?: number, cols?: number
   return true;
 }
 
-export function generateLevel(activeDifficulty: Difficulty = 'medium'): any {
-  const config = DIFFICULTY_CONFIGS[activeDifficulty] || DIFFICULTY_CONFIGS.medium;
+// Within-difficulty progression curve: as the level number climbs, boards get
+// busier (shorter max arrows -> more arrows to clear) and slightly curlier.
+// Ramps over the first 25 levels of a difficulty, then holds the ceiling so
+// late-game stays challenging but stable.
+function applyLevelRamp(config: DifficultyConfig, levelNum: number): DifficultyConfig {
+  const lvl = Math.max(1, Math.floor(levelNum) || 1);
+  const t = Math.min(1, (lvl - 1) / 24);
+  if (t <= 0) return config;
+  return {
+    ...config,
+    maxLen: Math.max(config.minLen, Math.round(config.maxLen - t * 4)),
+    turnWeight: Math.min(0.9, config.turnWeight + t * 0.15),
+  };
+}
+
+export function generateLevel(activeDifficulty: Difficulty = 'medium', levelNum: number = 1): any {
+  const base = DIFFICULTY_CONFIGS[activeDifficulty] || DIFFICULTY_CONFIGS.medium;
+  // Within-difficulty progression: higher levels get busier boards.
+  const config = applyLevelRamp(base, levelNum);
 
   // Single-pass generation. Levels are solvable by construction (see tryGenerateLevel),
   // so the old validate-and-retry storm is gone. This small bounded loop only recovers

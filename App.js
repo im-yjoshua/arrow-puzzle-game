@@ -809,7 +809,7 @@ const GameScreen = ({ onBack }) => {
   }));
 
   const buildLevelMatrix = React.useCallback((levelNum, diff = activeDifficulty) => {
-    const level = generateLevel(diff);
+    const level = generateLevel(diff, levelNum);
     const gridToUse = level.grid;
 
     const uniqueArrows = new Map();
