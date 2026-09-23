@@ -16,6 +16,7 @@ export interface Block {
   direction: Direction;
   cells: CellCoord[]; // Ordered from tail (cells[0]) to head (cells[len - 1])
   len: number;
+  hitsRequired: number; // 1 = normal; 2 = locked (needs an extra tap to crack the lock)
 }
 
 export interface DifficultyConfig {
@@ -246,6 +247,7 @@ function tryGenerateLevel(config: DifficultyConfig, allowMicro: boolean) {
       direction: blockDir,
       cells: best.snake,
       len: best.snake.length,
+      hitsRequired: 1,
     };
 
     blocks.push(block);
@@ -398,6 +400,7 @@ export function generateLevel(activeDifficulty: Difficulty = 'medium', levelNum:
     const candidate = tryGenerateLevel(config, false);
     if (candidate) {
       assertSolvableByConstruction(candidate);
+      markLockedArrows(candidate.blocks, activeDifficulty, levelNum);
       return { ...candidate, difficulty: activeDifficulty };
     }
   }
@@ -408,11 +411,34 @@ export function generateLevel(activeDifficulty: Difficulty = 'medium', levelNum:
     const candidate = tryGenerateLevel(config, true);
     if (candidate) {
       assertSolvableByConstruction(candidate);
+      markLockedArrows(candidate.blocks, activeDifficulty, levelNum);
       return { ...candidate, difficulty: activeDifficulty };
     }
   }
 
   throw new Error(`[LevelGenerator] could not place a ${activeDifficulty} level after 20 attempts`);
+}
+
+// Locked (multi-hit) arrows: a fraction of arrows need one extra tap to crack
+// the lock before they can slither. Fraction scales with difficulty; easy never
+// gets them. Solvability is unaffected — locked arrows still clear in the same
+// order, they just need an extra tap.
+function markLockedArrows(blocks: Block[], difficulty: Difficulty, levelNum: number): void {
+  const fraction =
+    difficulty === 'extraHard' ? 0.3
+    : difficulty === 'hard' ? 0.2
+    : difficulty === 'medium' && levelNum >= 10 ? 0.15
+    : 0;
+  if (fraction <= 0 || blocks.length < 4) return;
+  const idx = blocks.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  const k = Math.max(1, Math.round(blocks.length * fraction));
+  for (let n = 0; n < k; n++) {
+    blocks[idx[n]].hitsRequired = 2;
+  }
 }
 
 // Dev-only sanity check that the construction invariant holds. Never runs in
