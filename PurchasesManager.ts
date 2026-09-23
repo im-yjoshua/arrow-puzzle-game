@@ -12,62 +12,6 @@ export const REVENUECAT_KEYS = {
   android: process.env.EXPO_PUBLIC_RC_ANDROID_KEY || 'goog_placeholder_mock_android_key',
 };
 
-// Fallback consumable offerings used for sandbox/Expo Go preview when dashboard products are pending
-export const MOCK_OFFERINGS_PACKAGES: PurchasesPackage[] = [
-  {
-    identifier: 'pack_diamonds_50',
-    packageType: 'CUSTOM' as any,
-    product: {
-      identifier: 'pack_diamonds_50',
-      description: 'A sparkling pouch of 50 diamonds for revives & hints.',
-      title: 'Handful of Diamonds',
-      price: 0.99,
-      priceString: '$0.99',
-      currencyCode: 'USD',
-    } as any,
-    offeringIdentifier: 'default',
-  } as PurchasesPackage,
-  {
-    identifier: 'pack_coins_1000',
-    packageType: 'CUSTOM' as any,
-    product: {
-      identifier: 'pack_coins_1000',
-      description: '1,000 shining gold coins to unlock themes and refill hearts.',
-      title: 'Chest of Coins',
-      price: 1.99,
-      priceString: '$1.99',
-      currencyCode: 'USD',
-    } as any,
-    offeringIdentifier: 'default',
-  } as PurchasesPackage,
-  {
-    identifier: 'pack_diamonds_150',
-    packageType: 'CUSTOM' as any,
-    product: {
-      identifier: 'pack_diamonds_150',
-      description: '150 radiant gems to unlock premium app icons & power-ups.',
-      title: 'Mountain of Diamonds',
-      price: 2.99,
-      priceString: '$2.99',
-      currencyCode: 'USD',
-    } as any,
-    offeringIdentifier: 'default',
-  } as PurchasesPackage,
-  {
-    identifier: 'pack_unlimited_hearts',
-    packageType: 'LIFETIME' as any,
-    product: {
-      identifier: 'pack_unlimited_hearts',
-      description: 'Permanently remove the 3-strike penalty and play stress-free with infinite lives.',
-      title: 'Unlimited Hearts (∞)',
-      price: 4.99,
-      priceString: '$4.99',
-      currencyCode: 'USD',
-    } as any,
-    offeringIdentifier: 'default',
-  } as PurchasesPackage,
-];
-
 export interface ConsumableReward {
   type: 'coins' | 'diamonds' | 'unlimited_hearts' | 'unknown';
   amount: number;
@@ -144,7 +88,7 @@ export const initializePurchases = async (): Promise<boolean> => {
     // Native keys (appl_ or goog_) or mock placeholders will trigger RevenueCat validation errors in Expo Go.
     const isWebCompatible = apiKey.startsWith('test_') || apiKey.startsWith('rcb_');
     if (inExpoGo && !isWebCompatible) {
-      console.log('[PurchasesManager] Expo Go preview detected with placeholder/native keys. Operating in simulated sandbox mode.');
+      console.log('[PurchasesManager] Expo Go preview detected with placeholder/native keys. In-app purchases are disabled until real RevenueCat keys are configured.');
       isPurchasesConfigured = false;
       isNativeAvailable = false;
       return false;
@@ -172,7 +116,8 @@ export const initializePurchases = async (): Promise<boolean> => {
 
 /**
  * Retrieves active IAP offerings and packages from RevenueCat.
- * Falls back to preview mock packages in development/sandbox if none configured.
+ * Returns an empty list when the SDK is unconfigured or the dashboard has no
+ * packages yet — the shop renders a "coming soon" state instead of fake products.
  */
 export const fetchOfferings = async (): Promise<PurchasesPackage[]> => {
   try {
@@ -181,9 +126,8 @@ export const fetchOfferings = async (): Promise<PurchasesPackage[]> => {
     }
 
     if (!isPurchasesConfigured) {
-      console.log('[PurchasesManager] Using fallback mock offerings (Expo Go / Sandbox mode)');
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      return MOCK_OFFERINGS_PACKAGES;
+      console.log('[PurchasesManager] Purchases not configured; no offerings available');
+      return [];
     }
 
     const offerings: PurchasesOfferings = await Purchases.getOfferings();
@@ -207,12 +151,11 @@ export const fetchOfferings = async (): Promise<PurchasesPackage[]> => {
       return allPackages;
     }
 
-    // Fallback if no offerings configured yet in RevenueCat dashboard
-    console.log('[PurchasesManager] No active packages on dashboard; serving fallback consumables');
-    return MOCK_OFFERINGS_PACKAGES;
+    console.log('[PurchasesManager] No active packages on dashboard; returning empty offerings');
+    return [];
   } catch (error) {
-    console.warn('[PurchasesManager] Failed to fetch live offerings, falling back to mock consumables:', error);
-    return MOCK_OFFERINGS_PACKAGES;
+    console.warn('[PurchasesManager] Failed to fetch live offerings:', error);
+    return [];
   }
 };
 
@@ -221,23 +164,22 @@ export interface PurchaseResult {
   customerInfo?: CustomerInfo;
   userCancelled?: boolean;
   error?: any;
-  simulated?: boolean;
 }
 
 /**
- * Purchases a RevenueCat package.
- * Calls native Purchases.purchasePackage(pkg) or simulates sandbox completion in Expo Go.
+ * Purchases a RevenueCat package via the native store.
+ * Never simulates success: if the SDK is unconfigured (Expo Go / missing keys),
+ * the purchase fails loudly instead of granting free items.
  */
 export const purchaseStorePackage = async (pkg: PurchasesPackage): Promise<PurchaseResult> => {
   if (!pkg) {
     return { success: false, error: new Error('Invalid package') };
   }
 
-  // If native SDK is unconfigured or in Expo Go, handle via simulated sandbox purchase
+  // Purchases unavailable — fail instead of simulating a grant.
   if (!isPurchasesConfigured) {
-    console.log(`[PurchasesManager] Simulating sandbox purchase for ${pkg.identifier}...`);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    return { success: true, simulated: true };
+    console.warn(`[PurchasesManager] Purchase blocked for ${pkg.identifier}: RevenueCat not configured`);
+    return { success: false, error: new Error('In-app purchases are not available right now.') };
   }
 
   try {
@@ -249,10 +191,6 @@ export const purchaseStorePackage = async (pkg: PurchasesPackage): Promise<Purch
       return { success: false, userCancelled: true };
     }
 
-    // If native purchase throws due to sandbox or mock keys, allow sandbox fallback in dev
-    if (__DEV__) {
-      console.warn('[PurchasesManager] Native purchase threw error in DEV, checking fallback:', error);
-    }
     return { success: false, error };
   }
 };
@@ -297,5 +235,4 @@ export default {
   getPackageReward,
   hasUnlimitedHeartsEntitlement,
   REVENUECAT_KEYS,
-  MOCK_OFFERINGS_PACKAGES,
 };
