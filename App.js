@@ -816,9 +816,6 @@ const GameScreen = ({ onBack }) => {
   // counter negative.
   const liveArrowIdsRef = React.useRef(new Set());
   const isBufferingRef = React.useRef(false);
-  // Remaining taps needed per locked (multi-hit) arrow, keyed by arrow id.
-  // Cleared on every board load; falls back to the arrow's hitsRequired.
-  const arrowHitsRef = React.useRef({});
   // Per-level performance stats for the star rating. Reset on every board load.
   const mistakesRef = React.useRef(0);
   const hintsUsedRef = React.useRef(0);
@@ -1025,7 +1022,6 @@ const GameScreen = ({ onBack }) => {
         setGrid(nextMatrix.grid);
         setActiveArrowsState(nextMatrix.arrows);
         liveArrowIdsRef.current = new Set(nextMatrix.arrows.map(a => a.id));
-        arrowHitsRef.current = {};
         mistakesRef.current = 0;
         hintsUsedRef.current = 0;
         setEarnedStars(0);
@@ -1083,7 +1079,6 @@ const GameScreen = ({ onBack }) => {
       setGrid(buffered.grid);
       setActiveArrowsState(buffered.arrows);
       liveArrowIdsRef.current = new Set(buffered.arrows.map(a => a.id));
-      arrowHitsRef.current = {};
       mistakesRef.current = 0;
       hintsUsedRef.current = 0;
       setEarnedStars(0);
@@ -1098,7 +1093,6 @@ const GameScreen = ({ onBack }) => {
     setGrid(null);
     setActiveArrowsState([]);
     liveArrowIdsRef.current = new Set();
-    arrowHitsRef.current = {};
     mistakesRef.current = 0;
     hintsUsedRef.current = 0;
     setEarnedStars(0);
@@ -1110,7 +1104,6 @@ const GameScreen = ({ onBack }) => {
       setGrid(matrix.grid);
       setActiveArrowsState(matrix.arrows);
       liveArrowIdsRef.current = new Set(matrix.arrows.map(a => a.id));
-      arrowHitsRef.current = {};
       mistakesRef.current = 0;
       hintsUsedRef.current = 0;
       setEarnedStars(0);
@@ -1265,17 +1258,7 @@ const GameScreen = ({ onBack }) => {
           ]);
         }
 
-        // Locked (multi-hit) arrows: crack the lock instead of slithering until
-        // the final tap. The grid is untouched so the arrow keeps blocking.
-        const hitsRequired = clickedArrow.hitsRequired || 1;
-        const hitsLeft = arrowHitsRef.current[clickedArrow.id] ?? hitsRequired;
-        if (hitsLeft > 1) {
-          arrowHitsRef.current[clickedArrow.id] = hitsLeft - 1;
-          arrowRefs.current[clickedArrow.id]?.showUnlockHit();
-          return;
-        }
-        delete arrowHitsRef.current[clickedArrow.id];
-
+        // Every valid tap slides the arrow out immediately.
         // Instantly clear footprints so arrows behind can slither simultaneously
         setGrid(prevGrid => {
           const ng = prevGrid.map(row => [...row]);
@@ -1919,15 +1902,12 @@ const ArrowBlock = React.memo(React.forwardRef(({ arrow, arrowId, onSlitherCompl
   }, [arrow, cellSize, rows, cols]);
   const slitherDuration = 500;
 
-  const [showLock, setShowLock] = useState((arrow.hitsRequired || 1) > 1);
-
   React.useImperativeHandle(ref, () => ({
     slither: () => {
       // IF 'canMove' is true: Immediately trigger withTiming to Green with zero red flashing
       isRed.value = 0;
       isGold.value = 0;
       scale.value = 1;
-      setShowLock(false);
       isGreen.value = withTiming(1, { duration: 150 });
       progress.value = withTiming(EXIT_DIST, { duration: slitherDuration, easing: Easing.inOut(Easing.ease) });
       if (slitherTimeoutRef.current) {
@@ -1969,16 +1949,6 @@ const ArrowBlock = React.memo(React.forwardRef(({ arrow, arrowId, onSlitherCompl
         ),
         -1,
         true
-      );
-    },
-    showUnlockHit: () => {
-      // Locked-arrow crack feedback: flash gold briefly; the lock badge stays
-      // until the final tap slithers the arrow out.
-      isGreen.value = 0;
-      isRed.value = 0;
-      isGold.value = withSequence(
-        withTiming(1, { duration: 120 }),
-        withTiming(0, { duration: 250 })
       );
     }
   }));
@@ -2109,20 +2079,6 @@ const ArrowBlock = React.memo(React.forwardRef(({ arrow, arrowId, onSlitherCompl
           animatedProps={animatedHeadProps}
         />
       </Svg>
-      {showLock && arrow.cells && arrow.cells.length > 0 && (
-        <View
-          style={[
-            styles.lockBadge,
-            {
-              left: (arrow.cells[0].c - svgMinC) * cellSize + center - 11,
-              top: (arrow.cells[0].r - svgMinR) * cellSize + center - 11,
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.lockBadgeText}>🔒</Text>
-        </View>
-      )}
     </Animated.View>
   );
 }));
@@ -2842,19 +2798,6 @@ const styles = StyleSheet.create({
     color: '#F3EBE1',
     fontWeight: '800',
     fontSize: 15,
-  },
-  lockBadge: {
-    position: 'absolute',
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(38, 30, 26, 0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 5,
-  },
-  lockBadgeText: {
-    fontSize: 12,
   },
   levelPickerButton: {
     marginTop: 12,
