@@ -626,6 +626,14 @@ const DottedGridCanvas = React.memo(({ isComplete = false, onWaveComplete, cellA
 
 const HYPE_WORDS = ["Great!", "Amazing!", "Fabulous!", "Perfect!"];
 
+// Star rating for a completed level: 3 for a flawless run, 2 for a couple of
+// slips, 1 for finishing at all.
+function calcStars(mistakes, hintsUsed) {
+  if (mistakes <= 0 && hintsUsed <= 0) return 3;
+  if (mistakes <= 2 && hintsUsed <= 1) return 2;
+  return 1;
+}
+
 // Reusable floating hype text popup with Reanimated physics
 const FloatingText = React.memo(({ id, text, x, y, rotation, onComplete }) => {
   const translateY = useSharedValue(0);
@@ -752,6 +760,10 @@ const GameScreen = ({ onBack }) => {
   // counter negative.
   const liveArrowIdsRef = React.useRef(new Set());
   const isBufferingRef = React.useRef(false);
+  // Per-level performance stats for the star rating. Reset on every board load.
+  const mistakesRef = React.useRef(0);
+  const hintsUsedRef = React.useRef(0);
+  const [earnedStars, setEarnedStars] = useState(0);
 
   const { theme } = useTheme();
   const arrowProgressRef = React.useRef({});
@@ -934,6 +946,9 @@ const GameScreen = ({ onBack }) => {
         setGrid(nextMatrix.grid);
         setActiveArrowsState(nextMatrix.arrows);
         liveArrowIdsRef.current = new Set(nextMatrix.arrows.map(a => a.id));
+        mistakesRef.current = 0;
+        hintsUsedRef.current = 0;
+        setEarnedStars(0);
         arrowRefCallbacksRef.current = {};
         setBlocksLeft(nextMatrix.arrows.length);
         currency.refillHearts(3);
@@ -984,6 +999,9 @@ const GameScreen = ({ onBack }) => {
       setGrid(buffered.grid);
       setActiveArrowsState(buffered.arrows);
       liveArrowIdsRef.current = new Set(buffered.arrows.map(a => a.id));
+      mistakesRef.current = 0;
+      hintsUsedRef.current = 0;
+      setEarnedStars(0);
       arrowRefCallbacksRef.current = {};
       setBlocksLeft(buffered.arrows.length);
       setIsGenerating(false);
@@ -995,6 +1013,9 @@ const GameScreen = ({ onBack }) => {
     setGrid(null);
     setActiveArrowsState([]);
     liveArrowIdsRef.current = new Set();
+    mistakesRef.current = 0;
+    hintsUsedRef.current = 0;
+    setEarnedStars(0);
     arrowRefCallbacksRef.current = {};
     arrowProgressRef.current = {};
 
@@ -1003,6 +1024,9 @@ const GameScreen = ({ onBack }) => {
       setGrid(matrix.grid);
       setActiveArrowsState(matrix.arrows);
       liveArrowIdsRef.current = new Set(matrix.arrows.map(a => a.id));
+      mistakesRef.current = 0;
+      hintsUsedRef.current = 0;
+      setEarnedStars(0);
       arrowRefCallbacksRef.current = {};
       setBlocksLeft(matrix.arrows.length);
       setIsGenerating(false);
@@ -1152,6 +1176,8 @@ const GameScreen = ({ onBack }) => {
           ]);
         }
       } else {
+        // A wrong tap counts against the star rating, even with unlimited hearts.
+        mistakesRef.current += 1;
         // If player has Unlimited Hearts, bypass heart deduction and do not trigger Game Over!
         if (!currency.hasUnlimitedHearts && !currency.unlimitedHearts) {
           const remaining = currency.useHeart();
@@ -1180,6 +1206,14 @@ const GameScreen = ({ onBack }) => {
     setActiveArrowsState(prev => prev.filter(a => a.id !== arrowId));
     setBlocksLeft(prev => Math.max(0, prev - 1));
     if (liveArrowIdsRef.current.size === 0) {
+      // Award + persist the star rating for this level (best score is kept).
+      const stars = calcStars(mistakesRef.current, hintsUsedRef.current);
+      const st = useStore.getState();
+      const diff = st.activeDifficulty || 'medium';
+      const lvl = typeof st.currentLevel === 'object' && st.currentLevel !== null
+        ? st.currentLevel[diff] : 1;
+      st.setStarRating(diff, lvl, stars);
+      setEarnedStars(stars);
       setIsLevelComplete(true);
       AudioController.playLevelComplete();
       if (useStore.getState().settings.haptics) {
@@ -1235,6 +1269,7 @@ const GameScreen = ({ onBack }) => {
     // If player has inventory hints, consume 1 immediately without showing an ad!
     if (currency.hints > 0) {
       if (currency.useHint()) {
+        hintsUsedRef.current += 1;
         triggerHintHighlight();
         return;
       }
@@ -1245,6 +1280,7 @@ const GameScreen = ({ onBack }) => {
 
     AdService.showRewarded(
       () => {
+        hintsUsedRef.current += 1;
         triggerHintHighlight();
       },
       () => {
@@ -1418,7 +1454,7 @@ const GameScreen = ({ onBack }) => {
         </View>
       </View>
       
-      <RewardModal visible={isWon} onNextLevel={handleNextLevel} />
+      <RewardModal visible={isWon} onNextLevel={handleNextLevel} stars={earnedStars} />
       
       <GameOverModal
         visible={isGameOver && !isWon}
@@ -1566,7 +1602,7 @@ const TutorialOverlay = React.forwardRef(({ targetArrow, dynamicCellSize = CELL_
   );
 });
 
-const RewardModal = ({ visible, onNextLevel }) => {
+const RewardModal = ({ visible, onNextLevel, stars = 0 }) => {
   const { addItem, settings } = useStore();
   const currency = useCurrency();
   const [droppedItem, setDroppedItem] = useState(null);
@@ -1600,8 +1636,12 @@ const RewardModal = ({ visible, onNextLevel }) => {
   return (
     <Animated.View style={styles.rewardOverlay} entering={FadeIn}>
       <Text style={styles.winText}>Maze Solved!</Text>
-      
-      {!opened ? (
+      {stars > 0 && (
+        <Text style={styles.starRow}>
+          {'★'.repeat(stars)}{'☆'.repeat(Math.max(0, 3 - stars))}
+        </Text>
+      )}
+            {!opened ? (
         <JuicyButton style={styles.chestToOpen} onPress={handleOpen}>
           <Text style={styles.chestEmoji}>🎁</Text>
           <Text style={styles.chestHint}>Tap to Open</Text>
@@ -2326,6 +2366,13 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     marginBottom: 18,
+  },
+  starRow: {
+    fontSize: 34,
+    color: '#F5A623',
+    letterSpacing: 6,
+    marginBottom: 14,
+    textAlign: 'center',
   },
   retryButton: {
     backgroundColor: '#261E1A',

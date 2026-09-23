@@ -14,6 +14,8 @@ export const useStore = create(
       currentLevel: { easy: 1, medium: 1, hard: 1, extraHard: 1 },
       levelProgress: { easy: 1, medium: 1, hard: 1, extraHard: 1 },
       activeDifficulty: 'medium',
+      // Best star rating (1-3) earned per level: { [difficulty]: { [levelNumber]: stars } }
+      starRatings: {},
       settings: {
         bgm: true,
         sfx: true,
@@ -103,6 +105,32 @@ export const useStore = create(
           if (state.collection.find(i => i.id === item.id)) return state;
           return { collection: [...state.collection, item] };
         });
+      },
+
+      // Record a star rating for a completed level; keeps the best score.
+      // Persisted automatically by the persist middleware.
+      setStarRating: (diff, levelNum, stars) => {
+        const validDiffs = ['easy', 'medium', 'hard', 'extraHard'];
+        const d = validDiffs.includes(diff) ? diff : 'medium';
+        const lvl = Math.floor(Number(levelNum));
+        const s = Math.max(1, Math.min(3, Math.floor(Number(stars))));
+        if (!Number.isFinite(lvl) || lvl < 1 || !Number.isFinite(s)) return;
+        set((state) => {
+          const ratings = state.starRatings && typeof state.starRatings === 'object' ? state.starRatings : {};
+          const prev = ratings[d]?.[lvl] || 0;
+          if (s <= prev) return state; // keep the best
+          return {
+            starRatings: {
+              ...ratings,
+              [d]: { ...(ratings[d] || {}), [lvl]: s },
+            },
+          };
+        });
+      },
+
+      getStarRating: (diff, levelNum) => {
+        const ratings = get().starRatings;
+        return ratings?.[diff]?.[levelNum] || 0;
       },
     }),
     {
