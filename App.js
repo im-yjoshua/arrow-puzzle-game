@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Dimensions, LogBox, ScrollView, Modal, ActivityIndicator, Switch, Image, ImageBackground, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Dimensions, LogBox, ScrollView, Modal, ActivityIndicator, Switch, Image, ImageBackground, Alert, FlatList } from 'react-native';
 import { SafeAreaView as SafeAreaViewContext, SafeAreaProvider } from 'react-native-safe-area-context';
 import Animated, { 
   useSharedValue, 
@@ -305,16 +305,68 @@ const HomeLoadingBar = ({ onComplete }) => {
   );
 };
 
+const LevelPickerModal = ({ visible, onClose, difficulty, diffLabel, frontierNum, starRatings, onSelectLevel }) => {
+  const { theme } = useTheme();
+  const levels = React.useMemo(() => {
+    const arr = [];
+    const max = Math.max(1, frontierNum || 1);
+    for (let n = 1; n <= max; n++) arr.push(n);
+    return arr;
+  }, [frontierNum]);
+
+  const renderItem = ({ item: n }) => {
+    const stars = (starRatings && starRatings[difficulty] && starRatings[difficulty][n]) || 0;
+    return (
+      <JuicyButton style={[styles.levelCell, { backgroundColor: theme.card }]} onPress={() => onSelectLevel(n)}>
+        <Text style={[styles.levelCellNumber, { color: theme.text }]}>{n}</Text>
+        <Text style={styles.levelCellStars}>{'★'.repeat(stars)}{'☆'.repeat(3 - stars)}</Text>
+      </JuicyButton>
+    );
+  };
+
+  return (
+    <Modal visible={visible} transparent={true} animationType="fade" onRequestClose={onClose}>
+      <View style={styles.levelPickerBackdrop}>
+        <View style={[styles.levelPickerCard, { backgroundColor: theme.background }]}>
+          <Text style={[styles.levelPickerTitle, { color: theme.text }]}>{diffLabel} Levels</Text>
+          <Text style={[styles.levelPickerSubtitle, { color: theme.textSecondary }]}>
+            Replay any level you've unlocked
+          </Text>
+          <FlatList
+            data={levels}
+            numColumns={5}
+            keyExtractor={(n) => String(n)}
+            renderItem={renderItem}
+            contentContainerStyle={styles.levelPickerGrid}
+            showsVerticalScrollIndicator={false}
+          />
+          <JuicyButton style={[styles.levelPickerClose, { backgroundColor: theme.card }]} onPress={onClose}>
+            <Text style={[styles.levelPickerCloseText, { color: theme.text }]}>Close</Text>
+          </JuicyButton>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 const HomeScreen = ({ onPlay, onOpenSettings, onOpenDailyReward }) => {
   const { theme } = useTheme();
   const currency = useCurrency();
-  const { currentLevel, activeDifficulty, setActiveDifficulty } = useStore();
+  const { currentLevel, activeDifficulty, setActiveDifficulty, setCurrentLevel, levelFrontier, starRatings } = useStore();
+  const [levelPickerVisible, setLevelPickerVisible] = useState(false);
 
   const activeLevel = typeof currentLevel === 'object' && currentLevel !== null
     ? (currentLevel[activeDifficulty] || 1)
     : (typeof currentLevel === 'number' ? currentLevel : 1);
 
   const diffLabel = DIFFICULTIES.find(d => d.key === activeDifficulty)?.label || 'Medium';
+  const frontierNum = (levelFrontier && levelFrontier[activeDifficulty]) || activeLevel;
+
+  const handleSelectLevel = (n) => {
+    setCurrentLevel({ [activeDifficulty]: n });
+    setLevelPickerVisible(false);
+    onPlay();
+  };
 
   return (
     <SafeAreaViewContext style={[styles.homeContainer, { backgroundColor: theme.background }]}>
@@ -372,7 +424,22 @@ const HomeScreen = ({ onPlay, onOpenSettings, onOpenDailyReward }) => {
             PLAY LEVEL {activeLevel} ▶
           </Text>
         </JuicyButton>
+
+        {/* Level picker / replay */}
+        <JuicyButton style={[styles.levelPickerButton, { backgroundColor: theme.card }]} onPress={() => setLevelPickerVisible(true)}>
+          <Text style={[styles.levelPickerButtonText, { color: theme.text }]}>🗺 Levels</Text>
+        </JuicyButton>
       </View>
+
+      <LevelPickerModal
+        visible={levelPickerVisible}
+        onClose={() => setLevelPickerVisible(false)}
+        difficulty={activeDifficulty}
+        diffLabel={diffLabel}
+        frontierNum={frontierNum}
+        starRatings={starRatings}
+        onSelectLevel={handleSelectLevel}
+      />
     </SafeAreaViewContext>
   );
 };
@@ -2807,6 +2874,70 @@ const styles = StyleSheet.create({
   },
   lockBadgeText: {
     fontSize: 12,
+  },
+  levelPickerButton: {
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 16,
+  },
+  levelPickerButtonText: {
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  levelPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  levelPickerCard: {
+    width: '86%',
+    maxHeight: '72%',
+    borderRadius: 20,
+    padding: 18,
+  },
+  levelPickerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  levelPickerSubtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  levelPickerGrid: {
+    alignItems: 'center',
+    paddingBottom: 8,
+  },
+  levelCell: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    margin: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelCellNumber: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  levelCellStars: {
+    fontSize: 9,
+    color: '#E8A93D',
+    marginTop: 2,
+  },
+  levelPickerClose: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  levelPickerCloseText: {
+    fontWeight: '700',
+    fontSize: 15,
   },
   floatingTextContainer: {
     position: 'absolute',

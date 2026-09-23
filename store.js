@@ -13,6 +13,10 @@ export const useStore = create(
       equippedBackground: null,
       currentLevel: { easy: 1, medium: 1, hard: 1, extraHard: 1 },
       levelProgress: { easy: 1, medium: 1, hard: 1, extraHard: 1 },
+      // Highest level ever unlocked per difficulty. Replay never moves this
+      // backward — replaying an old level and winning advances currentLevel
+      // but keeps the frontier.
+      levelFrontier: { easy: 1, medium: 1, hard: 1, extraHard: 1 },
       activeDifficulty: 'medium',
       // Best star rating (1-3) earned per level: { [difficulty]: { [levelNumber]: stars } }
       starRatings: {},
@@ -49,12 +53,21 @@ export const useStore = create(
         const currentProgress = typeof state.currentLevel === 'object' && state.currentLevel !== null
           ? { ...state.currentLevel }
           : { easy: 1, medium: 1, hard: 1, extraHard: 1 };
+        const frontier = {
+          easy: 1, medium: 1, hard: 1, extraHard: 1,
+          ...(typeof state.levelFrontier === 'object' && state.levelFrontier !== null ? state.levelFrontier : {}),
+        };
         
         const curLevel = typeof currentProgress[diff] === 'number' ? currentProgress[diff] : 1;
         const nextLevel = curLevel + 1;
         const nextProgress = {
           ...currentProgress,
           [diff]: nextLevel,
+        };
+        // The frontier only ever moves forward, even when replaying old levels.
+        const nextFrontier = {
+          ...frontier,
+          [diff]: Math.max(typeof frontier[diff] === 'number' ? frontier[diff] : 1, nextLevel),
         };
 
         try {
@@ -65,21 +78,29 @@ export const useStore = create(
           AsyncStorage.setItem('activeDifficulty', diff).catch(() => {});
         } catch (_) {}
 
-        return { currentLevel: nextProgress, levelProgress: nextProgress };
+        return { currentLevel: nextProgress, levelProgress: nextProgress, levelFrontier: nextFrontier };
       }),
 
       setCurrentLevel: (lvlOrObj) => set((state) => {
         const diff = state.activeDifficulty || 'medium';
-        let nextProgress;
+        const frontier = {
+          easy: 1, medium: 1, hard: 1, extraHard: 1,
+          ...(typeof state.levelFrontier === 'object' && state.levelFrontier !== null ? state.levelFrontier : {}),
+        };
+        let num;
         if (typeof lvlOrObj === 'object' && lvlOrObj !== null) {
-          nextProgress = { ...state.currentLevel, ...lvlOrObj };
+          num = lvlOrObj[diff];
         } else {
-          const num = typeof lvlOrObj === 'number' ? lvlOrObj : 1;
-          nextProgress = {
-            ...(typeof state.currentLevel === 'object' ? state.currentLevel : { easy: 1, medium: 1, hard: 1, extraHard: 1 }),
-            [diff]: num,
-          };
+          num = lvlOrObj;
         }
+        // Replay picks are clamped to the unlocked frontier — this can never
+        // move progress backward or re-lock levels.
+        const maxUnlocked = typeof frontier[diff] === 'number' ? frontier[diff] : 1;
+        num = typeof num === 'number' && !isNaN(num) ? Math.max(1, Math.min(Math.floor(num), maxUnlocked)) : 1;
+        const nextProgress = {
+          ...(typeof state.currentLevel === 'object' ? state.currentLevel : { easy: 1, medium: 1, hard: 1, extraHard: 1 }),
+          [diff]: num,
+        };
         try {
           AsyncStorage.setItem('levelProgress', JSON.stringify(nextProgress)).catch(() => {});
         } catch (_) {}
@@ -199,9 +220,22 @@ export const useStore = create(
           AsyncStorage.setItem('levelProgress', JSON.stringify(progress)).catch(() => {});
           AsyncStorage.setItem('activeDifficulty', diff).catch(() => {});
 
+          // Existing players: frontier starts at their current progress unless
+          // a stored frontier is already ahead.
+          const frontier = { ...progress };
+          const storedFrontier = state.levelFrontier;
+          if (storedFrontier && typeof storedFrontier === 'object') {
+            for (const d of ['easy', 'medium', 'hard', 'extraHard']) {
+              if (typeof storedFrontier[d] === 'number' && storedFrontier[d] > 0) {
+                frontier[d] = Math.max(frontier[d], Math.floor(storedFrontier[d]));
+              }
+            }
+          }
+
           useStore.setState({
             currentLevel: progress,
             levelProgress: progress,
+            levelFrontier: frontier,
             activeDifficulty: diff,
           });
         } catch (err) {
