@@ -593,25 +593,36 @@ const DottedGridCanvas = React.memo(({ isComplete = false, onWaveComplete, cellA
     }
   }, [isComplete, rows, cols, onWaveComplete]);
 
+  // The dot grid only depends on board geometry + arrow coverage: memoize the
+  // element array so parent re-renders don't rebuild ~100+ elements.
+  const dots = React.useMemo(() => (
+    Array.from({ length: rows }).map((_, r) =>
+      Array.from({ length: cols }).map((_, c) => (
+        <CanvasDot
+          key={`dot-${r}-${c}`}
+          r={r}
+          c={c}
+          offset={offset}
+          dotSize={dotSize}
+          cellSize={cellSize}
+          isComplete={isComplete}
+          arrowInfo={cellArrowMap[r * cols + c]}
+        />
+      ))
+    )
+  ), [rows, cols, offset, dotSize, cellSize, isComplete, cellArrowMap]);
+
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 0 }]} pointerEvents="none">
-      {Array.from({ length: rows }).map((_, r) =>
-        Array.from({ length: cols }).map((_, c) => (
-          <CanvasDot
-            key={`dot-${r}-${c}`}
-            r={r}
-            c={c}
-            offset={offset}
-            dotSize={dotSize}
-            cellSize={cellSize}
-            isComplete={isComplete}
-            arrowInfo={cellArrowMap[`${r},${c}`]}
-          />
-        ))
-      )}
+      {dots}
     </View>
   );
 });
+// NOTE: React.memo's second argument must be a compare function, not a deps
+// array (the old `[isComplete, rows, cols, onWaveComplete]` array was invalid
+// API usage). Default shallow comparison is exactly right here: every prop is
+// a primitive except cellArrowMap, which is memoized in the parent and only
+// changes identity when the arrows or columns change.
 
 const HYPE_WORDS = ["Great!", "Amazing!", "Fabulous!", "Perfect!"];
 
@@ -734,6 +745,12 @@ const GameScreen = ({ onBack }) => {
   const [nextLevelMatrix, setNextLevelMatrix] = useState(null);
   const nextLevelMatrixRef = React.useRef(null);
   const activeSlitheringCountRef = React.useRef(0);
+  // Mirrors the ids of arrows still on the board so completion side effects
+  // can run outside of setState updaters (updaters must stay pure). Also makes
+  // completion idempotent: a duplicate or stale slither callback for the same
+  // arrow is ignored instead of double-firing the celebration or driving the
+  // counter negative.
+  const liveArrowIdsRef = React.useRef(new Set());
   const isBufferingRef = React.useRef(false);
 
   const { theme } = useTheme();
@@ -750,19 +767,6 @@ const GameScreen = ({ onBack }) => {
       arrowProgressRef.current[arrow.id] = makeMutable(0);
     }
   }
-
-  const cellArrowMap = React.useMemo(() => {
-    const map = {};
-    for (const arrow of activeArrowsState) {
-      const p = arrowProgressRef.current[arrow.id];
-      if (arrow.cells && p) {
-        arrow.cells.forEach((cell, idx) => {
-          map[`${cell.r},${cell.c}`] = { progress: p, index: idx };
-        });
-      }
-    }
-    return map;
-  }, [activeArrowsState]);
 
   const floatingIdRef = React.useRef(0);
   const lastTapTimeRef = React.useRef(0);
@@ -803,6 +807,22 @@ const GameScreen = ({ onBack }) => {
   const dynamicCellSize = Math.floor(availableWidth / currentGridCols);
   const currentBoardWidth = dynamicCellSize * currentGridCols;
   const currentBoardHeight = dynamicCellSize * currentGridRows;
+
+  // Maps board cells to the arrow covering them, keyed by integer r * cols + c
+  // (avoids per-dot template-string allocation on every lookup). Only cells
+  // under an arrow get an entry; everything else looks up as undefined.
+  const cellArrowMap = React.useMemo(() => {
+    const map = {};
+    for (const arrow of activeArrowsState) {
+      const p = arrowProgressRef.current[arrow.id];
+      if (arrow.cells && p) {
+        arrow.cells.forEach((cell, idx) => {
+          map[cell.r * currentGridCols + cell.c] = { progress: p, index: idx };
+        });
+      }
+    }
+    return map;
+  }, [activeArrowsState, currentGridCols]);
 
   const isAutoAdvancingRef = React.useRef(false);
   const boardFadeOpacity = useSharedValue(1);
@@ -913,6 +933,8 @@ const GameScreen = ({ onBack }) => {
         // Safely swap into the active board state
         setGrid(nextMatrix.grid);
         setActiveArrowsState(nextMatrix.arrows);
+        liveArrowIdsRef.current = new Set(nextMatrix.arrows.map(a => a.id));
+        arrowRefCallbacksRef.current = {};
         setBlocksLeft(nextMatrix.arrows.length);
         currency.refillHearts(3);
         setIsGameOver(false);
@@ -961,6 +983,8 @@ const GameScreen = ({ onBack }) => {
       }
       setGrid(buffered.grid);
       setActiveArrowsState(buffered.arrows);
+      liveArrowIdsRef.current = new Set(buffered.arrows.map(a => a.id));
+      arrowRefCallbacksRef.current = {};
       setBlocksLeft(buffered.arrows.length);
       setIsGenerating(false);
       return;
@@ -970,12 +994,16 @@ const GameScreen = ({ onBack }) => {
     setIsGenerating(true);
     setGrid(null);
     setActiveArrowsState([]);
+    liveArrowIdsRef.current = new Set();
+    arrowRefCallbacksRef.current = {};
     arrowProgressRef.current = {};
 
     scheduleIdleTask(() => {
       const matrix = buildLevelMatrix(activeLevel, activeDifficulty);
       setGrid(matrix.grid);
       setActiveArrowsState(matrix.arrows);
+      liveArrowIdsRef.current = new Set(matrix.arrows.map(a => a.id));
+      arrowRefCallbacksRef.current = {};
       setBlocksLeft(matrix.arrows.length);
       setIsGenerating(false);
     }, 60);
@@ -1044,6 +1072,22 @@ const GameScreen = ({ onBack }) => {
 
 
   const arrowRefs = React.useRef({});
+
+  // Stable per-arrow ref callbacks. React 19 passes `ref` as a regular prop,
+  // so React.memo shallow-compares it — an inline callback ref would create a
+  // new function every render and defeat ArrowBlock memoization. Ids repeat
+  // across levels (`block_0`, …), so the cache is cleared on every board load
+  // next to the arrowRefs reset.
+  const arrowRefCallbacksRef = React.useRef({});
+  const getArrowRefCallback = React.useCallback((id) => {
+    const cache = arrowRefCallbacksRef.current;
+    if (!cache[id]) {
+      cache[id] = (el) => {
+        arrowRefs.current[id] = el;
+      };
+    }
+    return cache[id];
+  }, []);
 
   const targetTutorialArrow = React.useMemo(() => {
     if (!grid || activeArrowsState.length === 0) return null;
@@ -1123,21 +1167,26 @@ const GameScreen = ({ onBack }) => {
     }
   };
 
-  const handleSlitherComplete = (arrow) => {
+  // Stable identity so memoized ArrowBlocks don't re-render when the parent does.
+  // Completion side effects run outside the setState updater (updaters stay pure).
+  // Idempotent: a duplicate/stale callback for an already-completed arrow is
+  // ignored, so the celebration can only fire once per board.
+  const handleSlitherComplete = React.useCallback((arrowId) => {
+    if (!liveArrowIdsRef.current.has(arrowId)) {
+      return;
+    }
+    liveArrowIdsRef.current.delete(arrowId);
     activeSlitheringCountRef.current = Math.max(0, activeSlitheringCountRef.current - 1);
-    setActiveArrowsState(prev => {
-      const next = prev.filter(a => a.id !== arrow.id);
-      if (next.length === 0) {
-        setIsLevelComplete(true);
-        AudioController.playLevelComplete();
-        if (settings.haptics) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
+    setActiveArrowsState(prev => prev.filter(a => a.id !== arrowId));
+    setBlocksLeft(prev => Math.max(0, prev - 1));
+    if (liveArrowIdsRef.current.size === 0) {
+      setIsLevelComplete(true);
+      AudioController.playLevelComplete();
+      if (useStore.getState().settings.haptics) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      return next;
-    });
-    setBlocksLeft(prev => prev - 1);
-  };
+    }
+  }, []);
 
   // Win chest "Next Level" -> interstitial every 3rd level, then advance.
   // Ad failures can't soft-lock: AdService guarantees onClose fires (error/timeout).
@@ -1308,10 +1357,11 @@ const GameScreen = ({ onBack }) => {
                   {activeArrowsState.map((arrow) => (
                     <ArrowBlock 
                       key={arrow.id} 
-                      ref={(el) => (arrowRefs.current[arrow.id] = el)}
-                      arrow={arrow} 
+                      ref={getArrowRefCallback(arrow.id)}
+                      arrow={arrow}
+                      arrowId={arrow.id}
                       progressSharedValue={arrowProgressRef.current[arrow.id]}
-                      onSlitherComplete={() => handleSlitherComplete(arrow)}
+                      onSlitherComplete={handleSlitherComplete}
                       cellSize={dynamicCellSize}
                       rows={currentGridRows}
                       cols={currentGridCols}
@@ -1575,7 +1625,10 @@ const RewardModal = ({ visible, onNextLevel }) => {
   );
 };
 
-const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedValue, cellSize = CELL_SIZE, rows = ROWS, cols = COLS, activeDifficulty = 'medium' }, ref) => {
+// Memoized: arrows are immutable data, and all props (arrow identity, shared
+// values, stable callbacks, primitive geometry) are referentially stable across
+// parent re-renders, so surviving arrows skip re-render entirely.
+const ArrowBlock = React.memo(React.forwardRef(({ arrow, arrowId, onSlitherComplete, progressSharedValue, cellSize = CELL_SIZE, rows = ROWS, cols = COLS, activeDifficulty = 'medium' }, ref) => {
   const wiggle = useSharedValue(0);
   const isGreen = useSharedValue(0);
   const isRed = useSharedValue(0);
@@ -1605,55 +1658,60 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
   // Strictly calculate final orthogonal direction (0°, 90°, 180°, 270°) by comparing last two grid tiles
   const finalDir = getArrowOrthogonalDirection(arrow);
   
-  const minR = Math.min(...cells.map(c => c.r));
-  const maxR = Math.max(...cells.map(c => c.r));
-  const minC = Math.min(...cells.map(c => c.c));
-  const maxC = Math.max(...cells.map(c => c.c));
+  // SVG geometry depends only on immutable arrow data + board geometry:
+  // compute once per arrow instead of on every parent re-render.
+  const { d, svgWidth, svgHeight, svgLeft, svgTop, svgMinC, svgMinR, center, EXIT_DIST, totalLen, snakeLen } = React.useMemo(() => {
+    const minR = Math.min(...cells.map(c => c.r));
+    const maxR = Math.max(...cells.map(c => c.r));
+    const minC = Math.min(...cells.map(c => c.c));
+    const maxC = Math.max(...cells.map(c => c.c));
 
-  let exitR = maxR, exitC = maxC, startR = minR, startC = minC;
-  
-  let exitTiles = 0;
-  if (finalDir === 'right') exitTiles = cols - head.c + 1;
-  if (finalDir === 'left') exitTiles = head.c + 2;
-  if (finalDir === 'down') exitTiles = rows - head.r + 1;
-  if (finalDir === 'up') exitTiles = head.r + 2;
+    let exitR = maxR, exitC = maxC, startR = minR, startC = minC;
 
-  const snakeLen = (N - 1) * cellSize;
-  const EXIT_DIST = exitTiles * cellSize + snakeLen;
-  
-  if (finalDir === 'up') startR = -10;
-  if (finalDir === 'down') exitR = rows + 10;
-  if (finalDir === 'left') startC = -10;
-  if (finalDir === 'right') exitC = cols + 10;
+    let exitTiles = 0;
+    if (finalDir === 'right') exitTiles = cols - head.c + 1;
+    if (finalDir === 'left') exitTiles = head.c + 2;
+    if (finalDir === 'down') exitTiles = rows - head.r + 1;
+    if (finalDir === 'up') exitTiles = head.r + 2;
 
-  const svgMinR = Math.min(minR, startR);
-  const svgMaxR = Math.max(maxR, exitR);
-  const svgMinC = Math.min(minC, startC);
-  const svgMaxC = Math.max(maxC, exitC);
+    const snakeLen = (N - 1) * cellSize;
+    const EXIT_DIST = exitTiles * cellSize + snakeLen;
 
-  const svgWidth = (svgMaxC - svgMinC + 1) * cellSize;
-  const svgHeight = (svgMaxR - svgMinR + 1) * cellSize;
-  const svgLeft = svgMinC * cellSize;
-  const svgTop = svgMinR * cellSize;
+    if (finalDir === 'up') startR = -10;
+    if (finalDir === 'down') exitR = rows + 10;
+    if (finalDir === 'left') startC = -10;
+    if (finalDir === 'right') exitC = cols + 10;
 
-  const center = cellSize / 2;
-  let d = '';
-  for (let i = 0; i < N; i++) {
-    const cx = (cells[i].c - svgMinC) * cellSize + center;
-    const cy = (cells[i].r - svgMinR) * cellSize + center;
-    if (i === 0) d += `M ${cx} ${cy} `;
-    else d += `L ${cx} ${cy} `;
-  }
-  
-  let exitX = (head.c - svgMinC) * cellSize + center;
-  let exitY = (head.r - svgMinR) * cellSize + center;
-  if (finalDir === 'right') exitX += EXIT_DIST;
-  if (finalDir === 'left') exitX -= EXIT_DIST;
-  if (finalDir === 'down') exitY += EXIT_DIST;
-  if (finalDir === 'up') exitY -= EXIT_DIST;
-  d += `L ${exitX} ${exitY}`;
+    const svgMinR = Math.min(minR, startR);
+    const svgMaxR = Math.max(maxR, exitR);
+    const svgMinC = Math.min(minC, startC);
+    const svgMaxC = Math.max(maxC, exitC);
 
-  const totalLen = snakeLen + EXIT_DIST;
+    const svgWidth = (svgMaxC - svgMinC + 1) * cellSize;
+    const svgHeight = (svgMaxR - svgMinR + 1) * cellSize;
+    const svgLeft = svgMinC * cellSize;
+    const svgTop = svgMinR * cellSize;
+
+    const center = cellSize / 2;
+    let d = '';
+    for (let i = 0; i < N; i++) {
+      const cx = (cells[i].c - svgMinC) * cellSize + center;
+      const cy = (cells[i].r - svgMinR) * cellSize + center;
+      if (i === 0) d += `M ${cx} ${cy} `;
+      else d += `L ${cx} ${cy} `;
+    }
+
+    let exitX = (head.c - svgMinC) * cellSize + center;
+    let exitY = (head.r - svgMinR) * cellSize + center;
+    if (finalDir === 'right') exitX += EXIT_DIST;
+    if (finalDir === 'left') exitX -= EXIT_DIST;
+    if (finalDir === 'down') exitY += EXIT_DIST;
+    if (finalDir === 'up') exitY -= EXIT_DIST;
+    d += `L ${exitX} ${exitY}`;
+
+    const totalLen = snakeLen + EXIT_DIST;
+    return { d, svgWidth, svgHeight, svgLeft, svgTop, svgMinC, svgMinR, center, EXIT_DIST, totalLen, snakeLen };
+  }, [arrow, cellSize, rows, cols]);
   const slitherDuration = 500;
 
   React.useImperativeHandle(ref, () => ({
@@ -1671,7 +1729,7 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
         slitherTimeoutRef.current = null;
         if (typeof onSlitherComplete === 'function') {
           try {
-            onSlitherComplete();
+            onSlitherComplete(arrowId);
           } catch (_) {}
         }
       }, slitherDuration);
@@ -1788,26 +1846,28 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
     : Math.max(2, Math.round(cellSize * 0.15) - 2);
   
   // Exact center coordinate of the final grid cell
-  const hx = (head.c - svgMinC) * cellSize + center;
-  const hy = (head.r - svgMinR) * cellSize + center;
   const HEAD_SIZE = Math.round(cellSize * (isExtraHard ? 0.22 : 0.25));
-  
+
   // 4 hardcoded orthogonal SVG path strings based strictly on the final vector (0, 90, 180, or 270 degrees).
   // Tip is aligned flush with the center of the final grid cell (hx, hy).
-  let headPath = '';
-  if (finalDir === 'right') {
-    // 0 degrees - pointing Right (+X)
-    headPath = `M ${hx - HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx - HEAD_SIZE} ${hy + HEAD_SIZE}`;
-  } else if (finalDir === 'down') {
-    // 90 degrees - pointing Down (+Y)
-    headPath = `M ${hx - HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy - HEAD_SIZE}`;
-  } else if (finalDir === 'left') {
-    // 180 degrees - pointing Left (-X)
-    headPath = `M ${hx + HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy + HEAD_SIZE}`;
-  } else if (finalDir === 'up') {
-    // 270 degrees - pointing Up (-Y)
-    headPath = `M ${hx - HEAD_SIZE} ${hy + HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy + HEAD_SIZE}`;
-  }
+  const headPath = React.useMemo(() => {
+    const hx = (head.c - svgMinC) * cellSize + center;
+    const hy = (head.r - svgMinR) * cellSize + center;
+    if (finalDir === 'right') {
+      // 0 degrees - pointing Right (+X)
+      return `M ${hx - HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx - HEAD_SIZE} ${hy + HEAD_SIZE}`;
+    } else if (finalDir === 'down') {
+      // 90 degrees - pointing Down (+Y)
+      return `M ${hx - HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy - HEAD_SIZE}`;
+    } else if (finalDir === 'left') {
+      // 180 degrees - pointing Left (-X)
+      return `M ${hx + HEAD_SIZE} ${hy - HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy + HEAD_SIZE}`;
+    } else if (finalDir === 'up') {
+      // 270 degrees - pointing Up (-Y)
+      return `M ${hx - HEAD_SIZE} ${hy + HEAD_SIZE} L ${hx} ${hy} L ${hx + HEAD_SIZE} ${hy + HEAD_SIZE}`;
+    }
+    return '';
+  }, [arrow, cellSize, svgMinC, svgMinR, center, HEAD_SIZE]);
 
   return (
     <Animated.View style={[animatedStyle, { position: 'absolute', left: svgLeft, top: svgTop, width: svgWidth, height: svgHeight }]} pointerEvents="none">
@@ -1833,7 +1893,7 @@ const ArrowBlock = React.forwardRef(({ arrow, onSlitherComplete, progressSharedV
       </Svg>
     </Animated.View>
   );
-});
+}));
 
 
 
